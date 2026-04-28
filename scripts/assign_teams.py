@@ -39,9 +39,22 @@ JERSEY_TOP    = 0.25      # skip top 25 % of bbox (head)
 JERSEY_BOTTOM = 0.65      # stop at 65 % of bbox (waist)
 MIN_CROP_PX   = 4         # ignore tiny boxes
 
+# Players whose jersey a*b* is farther than this from the nearest cluster
+# centre are treated as non-players (goalkeeper different colour, referee).
+# Set to 0 to disable.  Tune by inspecting the cluster centre printout —
+# a good value is ~75–80 % of half the inter-cluster distance.
+OUTLIER_THRESH = 25.0
 
-def _jersey_ab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
-    """Return median (a*, b*) of the jersey zone, or None if crop is too small."""
+
+def _jersey_lab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
+    """Return median (L*, a*, b*) of the jersey zone, or None if crop is too small.
+
+    All three channels are returned so that outlier detection can use lightness
+    (L*) in addition to hue (a*b*). k-means is still fitted on a*b* only to
+    stay robust against lighting variation, but the goalkeeper's bright green
+    and the referee's distinct shade are far enough in 3-D L*a*b* space to be
+    reliably excluded.
+    """
     x1, y1, x2, y2 = (int(v) for v in bbox)
     h = y2 - y1
     jy1 = y1 + int(h * JERSEY_TOP)
@@ -50,9 +63,11 @@ def _jersey_ab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
     if crop.size < MIN_CROP_PX * MIN_CROP_PX * 3:
         return None
     lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
-    a_med = float(np.median(lab[:, :, 1]))
-    b_med = float(np.median(lab[:, :, 2]))
-    return np.array([a_med, b_med])
+    return np.array([
+        float(np.median(lab[:, :, 0])),   # L*
+        float(np.median(lab[:, :, 1])),   # a*
+        float(np.median(lab[:, :, 2])),   # b*
+    ])
 
 
 def _kmeans2(X: np.ndarray, n_init: int = 10, max_iter: int = 100,
@@ -98,7 +113,7 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
 
     # ── pass 1: collect jersey colours for k-means fitting ──────────────────
     print("Pass 1 — extracting jersey colours …")
-    ab_samples: list[np.ndarray] = []
+    lab_samples: list[np.ndarray] = []        # full L*a*b* for 3-D outlier check
     frame_cache: dict[int, np.ndarray] = {}   # frame_idx → BGR image
 
     for frame_data in frames:
@@ -115,18 +130,21 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
         frame_cache[fidx] = img
 
         for p in frame_data["players"]:
-            ab = _jersey_ab(img, p["bbox"])
-            if ab is not None:
-                ab_samples.append(ab)
+            lab = _jersey_lab(img, p["bbox"])
+            if lab is not None:
+                lab_samples.append(lab)
 
     cap.release()
 
-    if len(ab_samples) < 2:
+    if len(lab_samples) < 2:
         raise RuntimeError("Too few jersey samples — check that bboxes are valid.")
 
-    # ── k-means with k=2 (pure numpy, no sklearn DLL issues) ───────────────
-    print(f"  {len(ab_samples)} jersey samples collected, fitting k-means …")
-    centres = _kmeans2(np.array(ab_samples), n_init=10, max_iter=100, seed=42)
+    lab_arr = np.array(lab_samples)   # (N, 3)  L*, a*, b*
+    ab_arr  = lab_arr[:, 1:]          # (N, 2)  a*, b* — used for k-means
+
+    # ── k-means with k=2 on a*b* (pure numpy, no sklearn DLL issues) ────────
+    print(f"  {len(lab_samples)} jersey samples collected, fitting k-means …")
+    centres = _kmeans2(ab_arr, n_init=10, max_iter=100, seed=42)
 
     # Deterministic label: cluster with lower a* → "A", other → "B"
     # (arbitrary but consistent within a clip)
@@ -135,8 +153,20 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
     else:
         team_map = {0: "B", 1: "A"}
 
-    print(f"  Cluster 0 -> Team {team_map[0]}  |  centre a*b* = {centres[0].round(1)}")
-    print(f"  Cluster 1 -> Team {team_map[1]}  |  centre a*b* = {centres[1].round(1)}")
+    # Build 3-D cluster centres (L*a*b*) by averaging L* of samples in each cluster
+    labels_2d = np.argmin(
+        np.linalg.norm(ab_arr[:, None, :] - centres[None, :, :], axis=2), axis=1
+    )
+    centres_3d = np.array([
+        lab_arr[labels_2d == k].mean(axis=0) if (labels_2d == k).any()
+        else np.array([128.0, centres[k, 0], centres[k, 1]])
+        for k in range(2)
+    ])   # shape (2, 3)
+
+    inter_dist = float(np.linalg.norm(centres[0] - centres[1]))
+    print(f"  Cluster 0 -> Team {team_map[0]}  |  centre L*a*b* = {centres_3d[0].round(1)}")
+    print(f"  Cluster 1 -> Team {team_map[1]}  |  centre L*a*b* = {centres_3d[1].round(1)}")
+    print(f"  Inter-cluster distance (a*b*) = {inter_dist:.1f}  |  3-D outlier threshold = {OUTLIER_THRESH}")
 
     # ── pass 2: assign every player in every frame ───────────────────────────
     print("Pass 2 — assigning team labels to all frames …")
@@ -166,11 +196,19 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
             total += 1
             if img is None:
                 continue
-            ab = _jersey_ab(img, p["bbox"])
-            if ab is None:
+            lab = _jersey_lab(img, p["bbox"])
+            if lab is None:
                 continue
-            dists = np.linalg.norm(centres - ab, axis=1)
-            cluster = int(np.argmin(dists))
+            # Outlier check in 3-D L*a*b* space — catches GK (bright green)
+            # and referee (distinct shade) that look similar in a*b* alone
+            if OUTLIER_THRESH > 0:
+                dists_3d = np.linalg.norm(centres_3d - lab, axis=1)
+                if float(np.min(dists_3d)) > OUTLIER_THRESH:
+                    p["team"] = None   # goalkeeper / referee — excluded
+                    continue
+            # Team assignment uses a*b* only (lighting-robust)
+            dists_2d = np.linalg.norm(centres - lab[1:], axis=1)
+            cluster = int(np.argmin(dists_2d))
             p["team"] = team_map[cluster]
             assigned += 1
 

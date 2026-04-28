@@ -30,9 +30,6 @@ from scipy.optimize import linear_sum_assignment
 from ultralytics import YOLO
 
 from src.config import (
-    BORDER_BOT,
-    BORDER_TOP,
-    BORDER_X,
     CLIPS_DIR,
     DEFAULT_FPS,
     PERSON_CLASS_ID,
@@ -117,87 +114,6 @@ class _CentroidTracker:
         return result
 
 
-# ── pitch detection + filtering ──────────────────────────────────────────────
-
-# HSV range for football pitch grass.
-# H 30-85 covers yellow-green to pure green (avoids cyan/blue stands).
-# S ≥ 40 avoids washed-out whites (line markings, shirts).
-# V 30-210 excludes very dark shadows and very bright specular highlights.
-_GRASS_LO = np.array([30,  40,  30], dtype=np.uint8)
-_GRASS_HI = np.array([85, 255, 210], dtype=np.uint8)
-
-
-def _build_pitch_hull(video_path: Path, n_samples: int = 12) -> np.ndarray | None:
-    """Return the convex hull polygon of the grass playing surface.
-
-    Samples n_samples frames spread across the clip, thresholds each frame
-    for grass colour in HSV, then combines them via pixel-wise vote. The
-    convex hull of the resulting green region gives a tight polygon around the
-    pitch that automatically excludes advertising boards, coach technical areas,
-    and ball-boy positions (which sit on concrete / artificial surfaces).
-
-    Returns an (N, 2) float32 array of hull vertices in (x, y) pixel coords,
-    or None if grass detection yields too few pixels to be reliable.
-    """
-    cap = cv2.VideoCapture(str(video_path))
-    total  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    W      = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    H      = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    votes  = np.zeros((H, W), dtype=np.uint16)
-
-    indices = np.linspace(0, total - 1, n_samples, dtype=int)
-    for idx in indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
-        ok, frame = cap.read()
-        if not ok:
-            continue
-        hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, _GRASS_LO, _GRASS_HI)
-        votes += (mask > 0).astype(np.uint16)
-    cap.release()
-
-    # Keep pixels green in at least half the samples (robust to camera cuts)
-    binary = ((votes >= n_samples // 2) * 255).astype(np.uint8)
-
-    # Close white lines and gaps so the pitch interior is solid green
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (40, 40))
-    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN,  cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (10, 10)))
-
-    # Collect all green pixel coordinates and compute their convex hull
-    ys, xs = np.where(binary > 0)
-    if len(xs) < 50:
-        return None
-    pts  = np.column_stack([xs, ys]).astype(np.float32)
-    hull = cv2.convexHull(pts)          # shape (N, 1, 2)
-    return hull.reshape(-1, 2)          # (N, 2)
-
-
-def _filter_by_pitch(boxes: np.ndarray, hull: np.ndarray) -> np.ndarray:
-    """Keep only detections whose bbox centre lies inside the pitch hull."""
-    if len(boxes) == 0:
-        return boxes
-    hull_i32 = hull.astype(np.float32)
-    keep = np.array([
-        cv2.pointPolygonTest(hull_i32, (float((b[0]+b[2])/2), float((b[1]+b[3])/2)), False) >= 0
-        for b in boxes
-    ])
-    return boxes[keep]
-
-
-def _apply_border_filter(boxes: np.ndarray, w: int, h: int) -> np.ndarray:
-    """Fallback filter when pitch-hull detection fails."""
-    if len(boxes) == 0:
-        return boxes
-    cx = (boxes[:, 0] + boxes[:, 2]) / 2
-    cy = (boxes[:, 1] + boxes[:, 3]) / 2
-    mask = (
-        (cx > w * BORDER_X) & (cx < w * (1 - BORDER_X)) &
-        (cy > h * BORDER_TOP) & (cy < h * (1 - BORDER_BOT))
-    )
-    return boxes[mask]
-
 
 def run_tracking(video_path: Path, model_name: str = YOLO_MODEL) -> dict:
     """Detect + track persons across a video, return JSON-serialisable dict."""
@@ -207,17 +123,7 @@ def run_tracking(video_path: Path, model_name: str = YOLO_MODEL) -> dict:
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or DEFAULT_FPS
     frame_count_meta = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     cap.release()
-
-    # Build pitch mask once from sampled frames; fall back to border filter if it fails
-    print("Building pitch mask from grass colour ...")
-    pitch_hull = _build_pitch_hull(video_path)
-    if pitch_hull is not None:
-        print(f"  Pitch hull OK — {len(pitch_hull)} vertices")
-    else:
-        print("  Pitch hull failed — using border filter fallback")
 
     results = model.predict(
         source=str(video_path),
@@ -232,10 +138,6 @@ def run_tracking(video_path: Path, model_name: str = YOLO_MODEL) -> dict:
                       if result.boxes is not None and len(result.boxes) > 0
                       else np.empty((0, 4)))
 
-        if pitch_hull is not None:
-            boxes_xyxy = _filter_by_pitch(boxes_xyxy, pitch_hull)
-        else:
-            boxes_xyxy = _apply_border_filter(boxes_xyxy, W, H)
         tracks = tracker.update(boxes_xyxy)
         players = []
         for tid, (x1, y1, x2, y2) in tracks:
