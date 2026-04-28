@@ -1,0 +1,30 @@
+# Data — keep folders, ignore contents
+data/clips/*
+data/tracking/*
+data/cache/*
+!data/clips/.gitkeep
+!data/tracking/.gitkeep
+!data/cache/.gitkeep
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Streamlit
+.streamlit/
+
+# Models (downloaded weights)
+*.pt
+*.onnx

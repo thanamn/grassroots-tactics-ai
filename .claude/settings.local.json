@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \"C:\\\\Users\\\\Ittyy\\\\.local\\\\share\\\\mamba\\\\envs\\\\dsde\\\\python.exe\" -c \"import google.genai; import ultralytics; import cv2; import streamlit; print\\('All OK'\\)\" 2>&1)"
+    ]
+  }
+}
