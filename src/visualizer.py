@@ -30,6 +30,13 @@ def _draw_team(frame: np.ndarray, points: list[tuple[float, float]], color: tupl
     if len(points) < 3:
         return
     pts = np.asarray(points, dtype=np.float32)
+
+    # Mirror metrics.py: drop the player furthest from the team centroid
+    # (goalkeeper proxy). Keeps overlay consistent with what the metric numbers show.
+    if len(pts) >= 4:
+        c = pts.mean(axis=0)
+        pts = pts[np.argsort(np.linalg.norm(pts - c, axis=1))[:-1]]
+
     try:
         hull = ConvexHull(pts)
         hull_pts = pts[hull.vertices].astype(np.int32)
