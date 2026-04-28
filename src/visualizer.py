@@ -25,6 +25,45 @@ TEAM_COLORS = {
     "B": (255, 120, 60),  # blue
 }
 
+# Temporal smoothing window (frames). Hull is built from the union of the last
+# SMOOTH_W frames so that a player missing for 1–3 frames due to occlusion or
+# a missed detection doesn't cause the hull to collapse and flicker.
+# At 25 fps, 7 frames ≈ 0.28 s — enough to bridge short gaps, short enough
+# that ghost positions don't linger visibly.
+SMOOTH_W = 7
+
+
+def _smoothed_teams(frames_by_idx: dict, frame_idx: int) -> dict[str, list[tuple[float, float]]]:
+    """Return per-team player positions smoothed over the last SMOOTH_W frames.
+
+    For each track_id that appeared in any frame in [frame_idx-SMOOTH_W+1,
+    frame_idx], we take the average (x, y) over those appearances. This keeps
+    each player at a stable position even when YOLO misses them for a frame or
+    two, eliminating hull flicker without adding visible lag.
+    """
+    lo = max(0, frame_idx - SMOOTH_W + 1)
+    team_tracks: dict[str, dict[int, list]] = {"A": {}, "B": {}}
+
+    for fi in range(lo, frame_idx + 1):
+        fd = frames_by_idx.get(fi)
+        if not fd:
+            continue
+        for p in fd["players"]:
+            t = p.get("team")
+            if t not in ("A", "B"):
+                continue
+            team_tracks[t].setdefault(p["track_id"], []).append((p["x"], p["y"]))
+
+    result: dict[str, list] = {}
+    for team, tracks in team_tracks.items():
+        pts = []
+        for positions in tracks.values():
+            xs = [pos[0] for pos in positions]
+            ys = [pos[1] for pos in positions]
+            pts.append((sum(xs) / len(xs), sum(ys) / len(ys)))
+        result[team] = pts
+    return result
+
 
 def _draw_team(frame: np.ndarray, points: list[tuple[float, float]], color: tuple[int, int, int]) -> None:
     if len(points) < 3:
@@ -69,11 +108,10 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
         ok, frame = cap.read()
         if not ok:
             break
-        record = frames_by_idx.get(frame_idx)
-        if record:
+        if frame_idx in frames_by_idx:
+            smoothed = _smoothed_teams(frames_by_idx, frame_idx)
             for team, color in TEAM_COLORS.items():
-                pts = [(p["x"], p["y"]) for p in record["players"] if p.get("team") == team]
-                _draw_team(frame, pts, color)
+                _draw_team(frame, smoothed.get(team, []), color)
         writer.write(frame)
         frame_idx += 1
 
