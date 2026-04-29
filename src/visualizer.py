@@ -119,7 +119,15 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
     writer.release()
 
     # mp4v is not browser-playable; re-encode to H.264 if ffmpeg is available.
+    # Falls back to the static binary that imageio-ffmpeg ships, so the
+    # pipeline produces a playable file even when system ffmpeg is missing.
     ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except ImportError:
+            ffmpeg = None
     if ffmpeg:
         tmp = output_path.with_suffix(".h264.mp4")
         subprocess.run(
