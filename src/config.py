@@ -24,9 +24,12 @@ PITCH_LENGTH_M = 105.0
 PITCH_WIDTH_M = 68.0
 
 # --- Tracking ----------------------------------------------------------
-YOLO_MODEL = "yolo26x.pt"   # YOLO26 extra-large — NMS-free, 43% faster CPU than yolo11x
+# Football-specific YOLOv8 weights (huggingface: uisikdag/yolo-v8-football-players-detection).
+# Classes: 0=ball, 1=goalkeeper, 2=player, 3=referee. We track only outfield
+# players + GK so the convex hull is built from the team, not officials.
+YOLO_MODEL = str(ROOT / "models" / "football_players.pt")
 TRACKER_CONFIG = "bytetrack.yaml"
-PERSON_CLASS_ID = 0   # COCO class id for "person"
+TRACK_CLASSES = [1, 2]   # goalkeeper + player; deliberately excludes ball and referee
 
 # --- LLM ---------------------------------------------------------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")

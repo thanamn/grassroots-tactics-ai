@@ -32,7 +32,7 @@ from ultralytics import YOLO
 from src.config import (
     CLIPS_DIR,
     DEFAULT_FPS,
-    PERSON_CLASS_ID,
+    TRACK_CLASSES,
     TRACKING_DIR,
     YOLO_MODEL,
 )
@@ -127,7 +127,7 @@ def run_tracking(video_path: Path, model_name: str = YOLO_MODEL) -> dict:
 
     results = model.predict(
         source=str(video_path),
-        classes=[PERSON_CLASS_ID],
+        classes=TRACK_CLASSES,
         stream=True,
         verbose=False,
     )
