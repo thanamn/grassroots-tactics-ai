@@ -167,7 +167,23 @@ for f in metrics["per_frame"]:
     df_rows.append(row)
 
 df = pd.DataFrame(df_rows).set_index("Time (s)")
-st.line_chart(df, height=260, color=["#f5a623", "#2196f3"])
+
+# Rendered with matplotlib instead of st.line_chart because st.line_chart
+# routes through PyArrow, whose native DLL is blocked by Windows Application
+# Control on this machine.
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(10, 2.6))
+if "Team A spread" in df.columns:
+    ax.plot(df.index, df["Team A spread"], color="#f5a623", label="Team A spread")
+if "Team B spread" in df.columns:
+    ax.plot(df.index, df["Team B spread"], color="#2196f3", label="Team B spread")
+ax.set_xlabel("Time (s)")
+ax.set_ylabel("Hull area (px²)")
+ax.legend(loc="upper right")
+ax.grid(True, alpha=0.3)
+fig.tight_layout()
+st.pyplot(fig, clear_figure=True)
 
 # ── Events ───────────────────────────────────────────────────────────────────
 
