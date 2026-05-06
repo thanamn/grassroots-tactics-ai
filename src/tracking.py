@@ -20,12 +20,11 @@ Notes
   pitch — the ground-plane point that spacing/hull metrics actually want to
   model. Centroid would over-weight tall players and skew the hull whenever
   bbox heights vary (camera zoom, motion blur).
-- Detections are filtered by both confidence (CONF_THRESHOLD) and bbox area
-  (MIN_BBOX_AREA) before reaching the tracker. Default YOLO confidence (0.25)
-  lets in too many refs and partially-occluded sideline figures; tightening
-  to 0.4 drops noise without losing real players. The area floor catches
-  tiny detections of distant spectators or broadcast-graphic figurines that
-  pollute the hull.
+- Class filtering is delegated to the football-pretrained model: TRACK_CLASSES
+  picks only goalkeeper + player IDs (1, 2). The previous COCO-based pipeline
+  needed an extra confidence and bbox-area filter to drop spectators/refs/
+  graphics — the football-specific weights don't detect those, so the filter
+  is gone.
 """
 from __future__ import annotations
 
@@ -42,17 +41,10 @@ from ultralytics import YOLO
 from src.config import (
     CLIPS_DIR,
     DEFAULT_FPS,
-    PERSON_CLASS_ID,
+    TRACK_CLASSES,
     TRACKING_DIR,
     YOLO_MODEL,
 )
-
-# ── detection-quality knobs ─────────────────────────────────────────────────
-# Tuned for broadcast / wide-angle football clips. Re-tune if grassroots
-# footage has a very different scale (e.g. close-up handheld → raise
-# MIN_BBOX_AREA, very-wide drone → lower it).
-CONF_THRESHOLD = 0.4   # YOLO confidence floor; default 0.25 admits too many refs/sideline figures
-MIN_BBOX_AREA  = 300   # px²; below this is almost certainly a spectator or graphic, not a player
 
 # Auto-detect CUDA. On the dev laptop (RTX 4070) this gives ~10–15× the
 # throughput of CPU inference; on a machine without an NVIDIA GPU this
@@ -170,8 +162,7 @@ def run_tracking(video_path: Path, model_name: str | None = None,
           f"model={model_name} vid_stride={vid_stride}")
     results = model.predict(
         source=str(video_path),
-        classes=[PERSON_CLASS_ID],
-        conf=CONF_THRESHOLD,
+        classes=TRACK_CLASSES,
         stream=True,
         verbose=False,
         device=DEVICE,
@@ -188,13 +179,6 @@ def run_tracking(video_path: Path, model_name: str | None = None,
         boxes_xyxy = (result.boxes.xyxy.cpu().numpy()
                       if result.boxes is not None and len(result.boxes) > 0
                       else np.empty((0, 4)))
-
-        # Min-area filter — drops distant spectators, graphics, and partial
-        # detections. Applied here (not inside the tracker) so the tracker
-        # never sees the noise and never spawns short-lived ghost IDs from it.
-        if len(boxes_xyxy):
-            areas = (boxes_xyxy[:, 2] - boxes_xyxy[:, 0]) * (boxes_xyxy[:, 3] - boxes_xyxy[:, 1])
-            boxes_xyxy = boxes_xyxy[areas >= MIN_BBOX_AREA]
 
         tracks = tracker.update(boxes_xyxy)
         players = []
