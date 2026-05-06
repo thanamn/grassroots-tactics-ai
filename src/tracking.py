@@ -15,8 +15,17 @@ Notes
   silently on this Windows environment after the first frame. The centroid
   tracker achieves the same result for short broadcast clips and requires
   only scipy — no native extensions with manifest issues.
-- Bounding-box centroid is used as player (x, y). Bottom-centre would be
-  more accurate (ground-plane) and is a v2 TODO.
+- Player (x, y) is the bottom-centre of the bounding box, not the geometric
+  centre. Bottom-centre approximates where the player's feet contact the
+  pitch — the ground-plane point that spacing/hull metrics actually want to
+  model. Centroid would over-weight tall players and skew the hull whenever
+  bbox heights vary (camera zoom, motion blur).
+- Detections are filtered by both confidence (CONF_THRESHOLD) and bbox area
+  (MIN_BBOX_AREA) before reaching the tracker. Default YOLO confidence (0.25)
+  lets in too many refs and partially-occluded sideline figures; tightening
+  to 0.4 drops noise without losing real players. The area floor catches
+  tiny detections of distant spectators or broadcast-graphic figurines that
+  pollute the hull.
 """
 from __future__ import annotations
 
@@ -26,6 +35,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import torch
 from scipy.optimize import linear_sum_assignment
 from ultralytics import YOLO
 
@@ -36,6 +46,20 @@ from src.config import (
     TRACKING_DIR,
     YOLO_MODEL,
 )
+
+# ── detection-quality knobs ─────────────────────────────────────────────────
+# Tuned for broadcast / wide-angle football clips. Re-tune if grassroots
+# footage has a very different scale (e.g. close-up handheld → raise
+# MIN_BBOX_AREA, very-wide drone → lower it).
+CONF_THRESHOLD = 0.4   # YOLO confidence floor; default 0.25 admits too many refs/sideline figures
+MIN_BBOX_AREA  = 300   # px²; below this is almost certainly a spectator or graphic, not a player
+
+# Auto-detect CUDA. On the dev laptop (RTX 4070) this gives ~10–15× the
+# throughput of CPU inference; on a machine without an NVIDIA GPU this
+# silently falls back to "cpu" rather than failing. We deliberately do
+# NOT raise on CPU — the fallback is the documented mode for non-GPU
+# users (Colab, paper-writing on a laptop without a GPU, etc.).
+DEVICE = 0 if torch.cuda.is_available() else "cpu"
 
 
 # ── centroid tracker ────────────────────────────────────────────────────────
@@ -115,8 +139,24 @@ class _CentroidTracker:
 
 
 
-def run_tracking(video_path: Path, model_name: str = YOLO_MODEL) -> dict:
-    """Detect + track persons across a video, return JSON-serialisable dict."""
+def run_tracking(video_path: Path, model_name: str | None = None,
+                 vid_stride: int = 1) -> dict:
+    """Detect + track persons across a video, return JSON-serialisable dict.
+
+    Parameters
+    ----------
+    model_name : str | None
+        Path/name of the YOLO weights. ``None`` falls back to ``YOLO_MODEL``
+        from config. For long clips the pipeline overrides this with a
+        nano model (``yolo11n.pt``) so tracking finishes in a session.
+    vid_stride : int
+        Process every ``vid_stride``-th frame of the video. ``1`` (default)
+        keeps full temporal resolution; long clips use stride 3–5 and let
+        the visualiser's smoothing window stretch to cover the gaps.
+        Ultralytics' built-in ``vid_stride`` is fed straight through so
+        we don't pay the cost of decoding skipped frames.
+    """
+    model_name = model_name or YOLO_MODEL
     model = YOLO(model_name)
     tracker = _CentroidTracker()
 
@@ -125,18 +165,36 @@ def run_tracking(video_path: Path, model_name: str = YOLO_MODEL) -> dict:
     frame_count_meta = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
 
+    gpu_name = torch.cuda.get_device_name(0) if DEVICE != 'cpu' else 'CPU only'
+    print(f"[tracking] device={DEVICE!r} ({gpu_name}) "
+          f"model={model_name} vid_stride={vid_stride}")
     results = model.predict(
         source=str(video_path),
         classes=[PERSON_CLASS_ID],
+        conf=CONF_THRESHOLD,
         stream=True,
         verbose=False,
+        device=DEVICE,
+        vid_stride=vid_stride,
     )
 
     frames = []
-    for frame_idx, result in enumerate(results):
+    # When vid_stride > 1, ultralytics yields one result per *processed*
+    # frame, so the loop index i maps back to the original video frame
+    # number via ``i * vid_stride``. We store the original frame number
+    # so downstream stages keep their existing per-frame timestamp logic.
+    for i, result in enumerate(results):
+        frame_idx = i * vid_stride
         boxes_xyxy = (result.boxes.xyxy.cpu().numpy()
                       if result.boxes is not None and len(result.boxes) > 0
                       else np.empty((0, 4)))
+
+        # Min-area filter — drops distant spectators, graphics, and partial
+        # detections. Applied here (not inside the tracker) so the tracker
+        # never sees the noise and never spawns short-lived ghost IDs from it.
+        if len(boxes_xyxy):
+            areas = (boxes_xyxy[:, 2] - boxes_xyxy[:, 0]) * (boxes_xyxy[:, 3] - boxes_xyxy[:, 1])
+            boxes_xyxy = boxes_xyxy[areas >= MIN_BBOX_AREA]
 
         tracks = tracker.update(boxes_xyxy)
         players = []
@@ -144,19 +202,27 @@ def run_tracking(video_path: Path, model_name: str = YOLO_MODEL) -> dict:
             players.append({
                 "track_id": int(tid),
                 "team": None,
+                # Bottom-centre = where the player's feet meet the pitch.
+                # See module docstring for why this beats geometric centroid
+                # for spacing/hull metrics.
                 "x": float((x1 + x2) / 2),
-                "y": float((y1 + y2) / 2),
+                "y": float(y2),
                 "bbox": [float(x1), float(y1), float(x2), float(y2)],
             })
         frames.append({"frame": frame_idx, "t": frame_idx / fps, "players": players})
 
-        if frame_idx % 100 == 0:
+        # Print every 100 processed frames, not every 100 source frames —
+        # otherwise stride=5 only logs every 500-frame block which is
+        # unhelpfully sparse.
+        if i % 100 == 0:
             print(f"  frame {frame_idx}/{frame_count_meta} — {len(players)} players")
 
     return {
         "clip_id": video_path.stem,
         "video_path": str(video_path),
         "fps": fps,
+        "vid_stride": vid_stride,
+        "model": model_name,
         "frame_count": len(frames),
         "frame_count_meta": frame_count_meta,
         "frames": frames,

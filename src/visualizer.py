@@ -33,15 +33,20 @@ TEAM_COLORS = {
 SMOOTH_W = 7
 
 
-def _smoothed_teams(frames_by_idx: dict, frame_idx: int) -> dict[str, list[tuple[float, float]]]:
-    """Return per-team player positions smoothed over the last SMOOTH_W frames.
+def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
+                    window: int = SMOOTH_W) -> dict[str, list[tuple[float, float]]]:
+    """Return per-team player positions smoothed over the last ``window`` frames.
 
-    For each track_id that appeared in any frame in [frame_idx-SMOOTH_W+1,
+    For each track_id that appeared in any frame in [frame_idx-window+1,
     frame_idx], we take the average (x, y) over those appearances. This keeps
     each player at a stable position even when YOLO misses them for a frame or
     two, eliminating hull flicker without adding visible lag.
+
+    When tracking was run with ``vid_stride > 1`` the caller passes a larger
+    window (typically ``SMOOTH_W * vid_stride``) so the same number of
+    tracked entries is covered despite the gaps between them.
     """
-    lo = max(0, frame_idx - SMOOTH_W + 1)
+    lo = max(0, frame_idx - window + 1)
     team_tracks: dict[str, dict[int, list]] = {"A": {}, "B": {}}
 
     for fi in range(lo, frame_idx + 1):
@@ -95,6 +100,14 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
     tracking = json.loads(tracking_path.read_text())
     frames_by_idx = {f["frame"]: f for f in tracking["frames"]}
 
+    # Scale the smoothing window by the tracking stride so sparse frames
+    # still produce a stable hull. With stride=5 and SMOOTH_W=7 we'd
+    # otherwise only have ~1 tracked entry per window — flickery hull.
+    # Scaling to SMOOTH_W * stride keeps ~SMOOTH_W tracked entries in
+    # the average regardless of stride.
+    stride = max(1, int(tracking.get("vid_stride", 1)))
+    window = SMOOTH_W * stride
+
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or tracking.get("fps", 25)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -103,15 +116,19 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
 
+    # With stride > 1 only every Nth frame has a tracking entry, but we
+    # want every output frame to carry the hull overlay (otherwise the
+    # video flashes between tracked and bare frames). So render the
+    # overlay on EVERY video frame, using the smoothing window to fill
+    # in player positions from the nearest tracked entries.
     frame_idx = 0
     while True:
         ok, frame = cap.read()
         if not ok:
             break
-        if frame_idx in frames_by_idx:
-            smoothed = _smoothed_teams(frames_by_idx, frame_idx)
-            for team, color in TEAM_COLORS.items():
-                _draw_team(frame, smoothed.get(team, []), color)
+        smoothed = _smoothed_teams(frames_by_idx, frame_idx, window=window)
+        for team, color in TEAM_COLORS.items():
+            _draw_team(frame, smoothed.get(team, []), color)
         writer.write(frame)
         frame_idx += 1
 
@@ -119,7 +136,15 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
     writer.release()
 
     # mp4v is not browser-playable; re-encode to H.264 if ffmpeg is available.
+    # Falls back to the static binary that imageio-ffmpeg ships, so the
+    # pipeline produces a playable file even when system ffmpeg is missing.
     ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        except ImportError:
+            ffmpeg = None
     if ffmpeg:
         tmp = output_path.with_suffix(".h264.mp4")
         subprocess.run(

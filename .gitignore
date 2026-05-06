@@ -2,12 +2,35 @@
 data/clips/*
 data/tracking/*
 data/cache/*
+data/jobs/*
 !data/clips/.gitkeep
 !data/tracking/.gitkeep
 !data/cache/.gitkeep
+!data/jobs/.gitkeep
 
 # Secrets
 .env
+
+# Claude Code per-user config (settings.json may contain personal info,
+# agents/commands/helpers/skills are user-specific plugin data)
+.claude/agents/
+.claude/commands/
+.claude/helpers/
+.claude/skills/
+.claude/settings.json
+.claude/settings.local.json
+
+# Design reference dump from the original Claude-design prototype.
+# We've already adapted the parts we use into web/. This folder is the
+# raw reference — keep it on disk but don't push it.
+HCI_GRASS_ROOT_FOOTBALL*/
+
+# Stray paste artefacts from accidental shell drops — belt-and-braces
+# in case any reappear before the next commit
+,-
+1``
+{,
+{'OK'
 
 # Python
 __pycache__/
@@ -22,9 +45,18 @@ venv/
 .idea/
 .DS_Store
 
-# Streamlit
-.streamlit/
+# Streamlit — ignore everything except the project's dark-theme config
+.streamlit/*
+!.streamlit/config.toml
 
 # Models (downloaded weights)
 *.pt
 *.onnx
+
+# Node / claude-flow
+node_modules/
+package.json
+package-lock.json
+.claude-flow/
+.swarm/
+.mcp.json

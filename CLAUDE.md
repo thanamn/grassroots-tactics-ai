@@ -23,10 +23,15 @@ spacing/compactness.** The paper presents the others as future work.
    formation detection, or per-player skill metrics, even if it seems easy.
    Scope creep is the biggest risk for this team.
 
-2. **Wizard-of-Oz, not live.** All artefacts (tracking JSON, metrics JSON,
-   overlay video, explanation JSON) are PRE-COMPUTED offline. The Streamlit app
-   only loads cached files. Do not refactor toward live inference during user
-   studies — runtime risk during the study would be catastrophic.
+2. **Live pipeline is the product (as of 2026-05-05).** Earlier the project
+   was Wizard-of-Oz; that rule was overridden by the user mid-week-4. The
+   FastAPI backend at `backend/` accepts video uploads and runs the full
+   pipeline (tracking → assign_teams → metrics → visualizer → explainer)
+   on the server. Frontend at `web/` polls for status. The Streamlit app
+   in `app/streamlit_app.py` is kept as a fallback for cached clips.
+   Upload is capped at ~10 min of footage — long videos are CPU-bound and
+   will not finish during a user-study session. Do not silently extend
+   the cap; if longer videos are needed, route via Colab GPU explicitly.
 
 3. **GenAI + HCI is the centre, not CV.** The course grades on AI explanation
    quality and user-study design, not on player-detection accuracy. If a CV
@@ -102,15 +107,20 @@ Pipeline modules:
 
 ## Python environment
 
-Package manager: **mamba** (miniforge3 at `C:\Users\Ittyy\miniforge3`).
-
-For this project (YOLOv8, OpenCV, google-genai) → always use the **`dsde`** env:
+Project uses a local **venv** at the repo root (Python 3.13). Always use it,
+never bare `python` / `python3` — those resolve to the Microsoft Store stub
+on Windows machines and break import paths.
 
 ```
-C:\Users\Ittyy\.local\share\mamba\envs\dsde\python.exe   # Python 3.11.15
+.venv\Scripts\python.exe        # invoke modules: -m src.metrics, etc.
+.venv\Scripts\streamlit.exe     # run the demo app
 ```
 
-**Never use bare `python` or `python3`** — resolves to Microsoft Store stub on this machine.
+PowerShell example:
+
+```powershell
+.\.venv\Scripts\streamlit run app\streamlit_app.py
+```
 
 ## Conventions and preferences
 
