@@ -253,6 +253,8 @@ const T = {
     textarea.input { resize: vertical; min-height: 60px; }
     .analysis-grid { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 20px; align-items: start; }
     @media (max-width: 900px) { .analysis-grid { grid-template-columns: 1fr; } }
+    .hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+    @media (max-width: 860px) { .hero-grid { grid-template-columns: 1fr; } }
   `;
   document.head.appendChild(el);
 })();
@@ -387,18 +389,35 @@ function Dashboard({ setScreen, lang }) {
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
       {/* Hero */}
-      <div style={{ backgroundImage: HEX_PATTERN, borderBottom: `1px solid ${C.border}`, padding: '48px 24px 40px' }}>
-        <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-            <Pulse />
-            <span style={{ fontSize: 12, color: C.green, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{t.eyebrow}</span>
-          </div>
-          <h1 style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 'clamp(28px,4vw,48px)', fontWeight: 700, lineHeight: 1.1, marginBottom: 12, maxWidth: 700 }}>
-            {t.hero1}<br />
-            <span style={{ color: C.green }}>{t.hero2}</span>
-          </h1>
-          <p style={{ color: C.gray, fontSize: 15, maxWidth: 540, lineHeight: 1.6, marginBottom: 32 }}>{t.heroLead}</p>
+      <div style={{ backgroundImage: HEX_PATTERN, borderBottom: `1px solid ${C.border}`, padding: '56px 24px' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto' }} className="hero-grid">
 
+          {/* Left: text */}
+          <div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+              <Pulse />
+              <span style={{ fontSize: 12, color: C.green, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{t.eyebrow}</span>
+            </div>
+            <h1 style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 'clamp(32px,3.5vw,54px)', fontWeight: 700, lineHeight: 1.1, marginBottom: 16 }}>
+              {t.hero1}<br />
+              <span style={{ color: C.green }}>{t.hero2}</span>
+            </h1>
+            <p style={{ color: C.gray, fontSize: 15, lineHeight: 1.7, marginBottom: 32, maxWidth: 480 }}>{t.heroLead}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[
+                { icon: '⚽', text: lang === 'th' ? 'ติดตามผู้เล่นทุกคนอัตโนมัติ' : 'Automatic player tracking' },
+                { icon: '📐', text: lang === 'th' ? 'วัดระยะห่างและพื้นที่ทีมแบบเรียลไทม์' : 'Measure spacing & team shape' },
+                { icon: '🤖', text: lang === 'th' ? 'AI อธิบายเป็นภาษาโค้ช' : 'AI explains in coach language' },
+              ].map(({ icon, text }) => (
+                <div key={text} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: C.grayLight }}>
+                  <span style={{ fontSize: 16 }}>{icon}</span>
+                  {text}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Right: upload box */}
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -409,33 +428,36 @@ function Dashboard({ setScreen, lang }) {
             onClick={() => fileRef.current?.click()}
             style={{
               border: `2px dashed ${dragOver ? C.green : C.border}`,
-              borderRadius: 16, padding: '40px 32px', maxWidth: 580, textAlign: 'center', cursor: 'pointer',
-              background: dragOver ? C.greenAlpha : 'rgba(26,43,60,0.6)',
+              borderRadius: 20, padding: '48px 32px', textAlign: 'center', cursor: 'pointer',
+              background: dragOver ? C.greenAlpha : 'rgba(26,43,60,0.5)',
               backdropFilter: 'blur(8px)', transition: 'all 0.25s',
-              ...(dragOver ? { boxShadow: '0 0 32px rgba(57,255,20,0.2)' } : {}),
+              boxShadow: dragOver ? '0 0 40px rgba(57,255,20,0.2)' : '0 4px 24px rgba(0,0,0,0.3)',
             }}>
             <input ref={fileRef} type="file" accept="video/*" style={{ display: 'none' }}
                    onChange={(e) => onPick(e.target.files?.[0])} />
-            <div style={{ marginBottom: 12 }}>
-              <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                <rect width="48" height="48" rx="12" fill={dragOver ? C.greenAlpha : C.border} />
-                <path d="M24 14 L24 34 M14 24 L34 24" stroke={dragOver ? C.green : C.gray} strokeWidth="3" strokeLinecap="round" />
+            <div style={{ marginBottom: 16 }}>
+              <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                <rect width="64" height="64" rx="16" fill={dragOver ? 'rgba(57,255,20,0.15)' : 'rgba(36,59,82,0.8)'} />
+                <rect x="10" y="18" width="34" height="26" rx="4" stroke={dragOver ? C.green : C.gray} strokeWidth="2.5" fill="none"/>
+                <path d="M44 26 L54 20 L54 44 L44 38" stroke={dragOver ? C.green : C.gray} strokeWidth="2.5" strokeLinejoin="round" fill="none"/>
+                <circle cx="22" cy="31" r="4" fill={dragOver ? C.green : C.gray} opacity="0.5"/>
               </svg>
             </div>
-            <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 20, fontWeight: 700, marginBottom: 6, color: dragOver ? C.green : C.white }}>
+            <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 22, fontWeight: 700, marginBottom: 8, color: dragOver ? C.green : C.white }}>
               {dragOver ? t.dropDrag : t.drop}
             </div>
-            <div style={{ fontSize: 13, color: C.gray, marginBottom: 20 }}>{t.dropHint}</div>
-            <button className="btn-primary" onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}>
+            <div style={{ fontSize: 13, color: C.gray, marginBottom: 28, lineHeight: 1.5 }}>{t.dropHint}</div>
+            <button className="btn-primary" style={{ fontSize: 15, padding: '12px 32px' }}
+                    onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}>
               {t.browse}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Stats */}
-      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '32px 24px 0' }}>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 32 }}>
+      {/* Stats + Recent */}
+      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '28px 24px 0' }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 28 }}>
           <StatCard number={jobs.filter((j) => j.status === 'done').length} label={t.statVideos} />
           <StatCard number={(totalSeconds / 60).toFixed(1)} label={t.statDuration} accent={C.blue} />
           <StatCard number={totalEvents} label={t.statEvents} accent={C.yellow} />
@@ -447,7 +469,10 @@ function Dashboard({ setScreen, lang }) {
         </div>
 
         {/* Recent */}
-        <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>{t.recent}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, letterSpacing: '0.02em' }}>{t.recent}</h2>
+          <div style={{ flex: 1, height: 1, background: C.border }} />
+        </div>
         {loading ? (
           <div style={{ color: C.gray, padding: 12 }}>…</div>
         ) : jobs.length === 0 ? (
@@ -895,7 +920,7 @@ function Analysis({ setScreen, lang, jobId }) {
           </div>
 
           {/* Right rail */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 80, maxHeight: 'calc(100vh - 100px)', overflowY: 'auto', paddingRight: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             <TacticalSummary
               t={t}
