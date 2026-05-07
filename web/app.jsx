@@ -114,6 +114,12 @@ const T = {
     confirmDelete: 'Delete this analysis and all artefacts?',
     teamALabel: 'Team A',
     teamBLabel: 'Team B',
+    myTeamQ: 'Which team is yours?',
+    yourTeam: 'Your Team',
+    opponent: 'Opponent',
+    possLabel: 'possession',
+    passLabel: 'passes',
+    accLabel: 'pass acc.',
   },
   th: {
     eyebrow: 'AI วิเคราะห์การยืนตำแหน่งของทีม',
@@ -192,6 +198,12 @@ const T = {
     confirmDelete: 'ลบการวิเคราะห์และไฟล์ที่เกี่ยวข้องทั้งหมด?',
     teamALabel: 'ทีม A',
     teamBLabel: 'ทีม B',
+    myTeamQ: 'ทีมไหนคือทีมของคุณ?',
+    yourTeam: 'ทีมของฉัน',
+    opponent: 'คู่แข่ง',
+    possLabel: 'ครองบอล',
+    passLabel: 'ส่งบอล',
+    accLabel: 'ความแม่น',
   },
 };
 
@@ -760,6 +772,7 @@ function Analysis({ setScreen, lang, jobId }) {
   const [error, setError] = useState(null);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState(null);
+  const [myTeam, setMyTeam] = useState(null);
   const videoRef = useRef(null);
 
   const reload = useCallback(async () => {
@@ -786,6 +799,10 @@ function Analysis({ setScreen, lang, jobId }) {
   if (!data) return <div style={{ padding: 40, color: C.gray }}>…</div>;
 
   const { job, metrics, explanation } = data;
+
+  const labelA = myTeam === 'A' ? t.yourTeam : myTeam === 'B' ? t.opponent : t.teamALabel;
+  const labelB = myTeam === 'B' ? t.yourTeam : myTeam === 'A' ? t.opponent : t.teamBLabel;
+
   const summary = metrics.summary || {};
   const teamA = summary.team_A?.hull_area?.mean || 0;
   const teamB = summary.team_B?.hull_area?.mean || 0;
@@ -842,7 +859,7 @@ function Analysis({ setScreen, lang, jobId }) {
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {events.map((ev, i) => (
-                    <EventRow key={i} ev={ev} t={t} onJump={() => jumpTo(ev.t)} />
+                    <EventRow key={i} ev={ev} t={t} labelA={labelA} labelB={labelB} onJump={() => jumpTo(ev.t)} />
                   ))}
                 </div>
               )}
@@ -851,6 +868,34 @@ function Analysis({ setScreen, lang, jobId }) {
 
           {/* Right rail */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 80 }}>
+
+            {/* Team picker */}
+            <div className="card" style={{ padding: '14px 18px' }}>
+              <div style={{ fontSize: 11, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>
+                {t.myTeamQ}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[['A', C.teamA], ['B', C.teamB]].map(([ab, color]) => {
+                  const label = ab === 'A' ? t.teamALabel : t.teamBLabel;
+                  const active = myTeam === ab;
+                  return (
+                    <button key={ab} onClick={() => setMyTeam(active ? null : ab)} style={{
+                      flex: 1, padding: '10px 12px', borderRadius: 10,
+                      border: `2px solid ${active ? color : C.border}`,
+                      background: active ? `${color}22` : 'transparent',
+                      color: active ? color : C.gray,
+                      fontFamily: 'Rajdhani,sans-serif', fontWeight: 700, fontSize: 14,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      transition: 'all 0.2s',
+                    }}>
+                      <span style={{ width: 12, height: 12, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                      {active ? t.yourTeam : label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <TacticalSummary
               t={t}
               explanation={explanation}
@@ -867,8 +912,8 @@ function Analysis({ setScreen, lang, jobId }) {
             <div className="card" style={{ padding: 20 }}>
               <div style={{ fontSize: 11, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{t.snapshot}</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <MiniStat label={t.teamA} value={`${(teamA / 1000).toFixed(0)} k px²`} color={C.teamA} />
-                <MiniStat label={t.teamB} value={`${(teamB / 1000).toFixed(0)} k px²`} color={C.teamB} />
+                <MiniStat label={labelA} value={`${(teamA / 1000).toFixed(0)} k px²`} color={C.teamA} />
+                <MiniStat label={labelB} value={`${(teamB / 1000).toFixed(0)} k px²`} color={C.teamB} />
                 <MiniStat label={t.gap} value={`${gap.toFixed(0)} px`} color={C.green} />
                 <MiniStat label={t.events} value={events.length} color={C.yellow} />
               </div>
@@ -882,12 +927,12 @@ function Analysis({ setScreen, lang, jobId }) {
               <div className="card" style={{ padding: 20 }}>
                 <div style={{ fontSize: 11, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{t.possTitle}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <MiniStat label={t.possA}   value={`${(poss.A  || 0).toFixed(0)}%`}  color={C.teamA} />
-                  <MiniStat label={t.possB}   value={`${(poss.B  || 0).toFixed(0)}%`}  color={C.teamB} />
-                  <MiniStat label={t.passCtA} value={passes.A != null ? passes.A : '–'} color={C.teamA} />
-                  <MiniStat label={t.passCtB} value={passes.B != null ? passes.B : '–'} color={C.teamB} />
-                  <MiniStat label={t.passAccA} value={acc.A != null ? `${(acc.A * 100).toFixed(0)}%` : '–'} color={C.teamA} />
-                  <MiniStat label={t.passAccB} value={acc.B != null ? `${(acc.B * 100).toFixed(0)}%` : '–'} color={C.teamB} />
+                  <MiniStat label={`${labelA} ${t.possLabel}`}  value={`${(poss.A  || 0).toFixed(0)}%`}  color={C.teamA} />
+                  <MiniStat label={`${labelB} ${t.possLabel}`}  value={`${(poss.B  || 0).toFixed(0)}%`}  color={C.teamB} />
+                  <MiniStat label={`${labelA} ${t.passLabel}`}  value={passes.A != null ? passes.A : '–'} color={C.teamA} />
+                  <MiniStat label={`${labelB} ${t.passLabel}`}  value={passes.B != null ? passes.B : '–'} color={C.teamB} />
+                  <MiniStat label={`${labelA} ${t.accLabel}`}   value={acc.A != null ? `${(acc.A * 100).toFixed(0)}%` : '–'} color={C.teamA} />
+                  <MiniStat label={`${labelB} ${t.accLabel}`}   value={acc.B != null ? `${(acc.B * 100).toFixed(0)}%` : '–'} color={C.teamB} />
                 </div>
               </div>
             )}
@@ -907,12 +952,12 @@ function MiniStat({ label, value, color }) {
   );
 }
 
-function EventRow({ ev, t, onJump }) {
+function EventRow({ ev, t, labelA, labelB, onJump }) {
   const isStretch = ev.type === 'stretch';
   const teamColor = ev.team === 'team_A' ? C.teamA : C.teamB;
   const verb = isStretch ? t.stretch : t.compress;
   const note = isStretch ? t.stretchNote : t.compressNote;
-  const teamLabel = ev.team === 'team_A' ? t.teamALabel : t.teamBLabel;
+  const teamLabel = ev.team === 'team_A' ? (labelA || t.teamALabel) : (labelB || t.teamBLabel);
   return (
     <button onClick={onJump} style={{
       display: 'flex', alignItems: 'center', gap: 12,
