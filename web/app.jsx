@@ -120,6 +120,10 @@ const T = {
     possLabel: 'possession',
     passLabel: 'passes',
     accLabel: 'pass acc.',
+    moreSpread: 'More spread',
+    moreCompact: 'More compact',
+    balanced: 'Balanced',
+    spacingNote: 'Higher area = more spread out. Compare between teams, not across clips.',
   },
   th: {
     eyebrow: 'AI วิเคราะห์การยืนตำแหน่งของทีม',
@@ -204,6 +208,10 @@ const T = {
     possLabel: 'ครองบอล',
     passLabel: 'ส่งบอล',
     accLabel: 'ความแม่น',
+    moreSpread: 'กระจายกว่า',
+    moreCompact: 'บีบกว่า',
+    balanced: 'สมดุล',
+    spacingNote: 'พื้นที่มากกว่า = กระจายตัวมากกว่า เทียบระหว่างสองทีมในคลิปเดียวกัน',
   },
 };
 
@@ -243,6 +251,8 @@ const T = {
     .input { width: 100%; background: ${C.bg}; border: 1px solid ${C.border}; border-radius: 8px; padding: 12px 14px; color: ${C.white}; font-size: 14px; font-family: 'Inter', sans-serif; transition: border-color 0.2s; }
     .input:focus { border-color: ${C.green}; }
     textarea.input { resize: vertical; min-height: 60px; }
+    .analysis-grid { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 20px; align-items: start; }
+    @media (max-width: 900px) { .analysis-grid { grid-template-columns: 1fr; } }
   `;
   document.head.appendChild(el);
 })();
@@ -803,6 +813,16 @@ function Analysis({ setScreen, lang, jobId }) {
   const labelA = myTeam === 'A' ? t.yourTeam : myTeam === 'B' ? t.opponent : t.teamALabel;
   const labelB = myTeam === 'B' ? t.yourTeam : myTeam === 'A' ? t.opponent : t.teamBLabel;
 
+  const spreadTag = (area, other) => {
+    if (!area || !other) return null;
+    const ratio = area / other;
+    if (ratio > 1.2) return { label: t.moreSpread, color: C.yellow };
+    if (ratio < 0.83) return { label: t.moreCompact, color: C.blue };
+    return { label: t.balanced, color: C.gray };
+  };
+  const tagA = spreadTag(teamA, teamB);
+  const tagB = spreadTag(teamB, teamA);
+
   const summary = metrics.summary || {};
   const teamA = summary.team_A?.hull_area?.mean || 0;
   const teamB = summary.team_B?.hull_area?.mean || 0;
@@ -835,7 +855,7 @@ function Analysis({ setScreen, lang, jobId }) {
           <span style={{ color: C.gray }}>· {(job.duration_s || 0).toFixed(1)}s · {(job.fps || 0).toFixed(0)} fps</span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: 20, alignItems: 'start' }}>
+        <div className="analysis-grid">
           {/* Left: video + chart + events */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
             <div className="card" style={{ overflow: 'hidden' }}>
@@ -875,7 +895,7 @@ function Analysis({ setScreen, lang, jobId }) {
           </div>
 
           {/* Right rail */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 80 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 80, maxHeight: 'calc(100vh - 100px)', overflowY: 'auto', paddingRight: 4 }}>
 
             <TacticalSummary
               t={t}
@@ -920,13 +940,13 @@ function Analysis({ setScreen, lang, jobId }) {
             <div className="card" style={{ padding: 20 }}>
               <div style={{ fontSize: 11, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{t.snapshot}</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <MiniStat label={labelA} value={`${(teamA / 1000).toFixed(0)} k px²`} color={C.teamA} />
-                <MiniStat label={labelB} value={`${(teamB / 1000).toFixed(0)} k px²`} color={C.teamB} />
+                <MiniStat label={labelA} value={`${(teamA / 1000).toFixed(0)} k px²`} color={C.teamA} tag={tagA?.label} tagColor={tagA?.color} />
+                <MiniStat label={labelB} value={`${(teamB / 1000).toFixed(0)} k px²`} color={C.teamB} tag={tagB?.label} tagColor={tagB?.color} />
                 <MiniStat label={t.gap} value={`${gap.toFixed(0)} px`} color={C.green} />
                 <MiniStat label={t.events} value={events.length} color={C.yellow} />
               </div>
               <div style={{ marginTop: 12, fontSize: 11, color: C.gray, lineHeight: 1.5 }}>
-                {t.unitNote}
+                {t.spacingNote}
               </div>
             </div>
 
@@ -951,11 +971,18 @@ function Analysis({ setScreen, lang, jobId }) {
   );
 }
 
-function MiniStat({ label, value, color }) {
+function MiniStat({ label, value, color, tag, tagColor }) {
   return (
     <div style={{ background: C.bg, borderRadius: 8, padding: '10px 12px' }}>
       <div style={{ fontSize: 10, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{label}</div>
       <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 22, fontWeight: 700, color }}>{value}</div>
+      {tag && (
+        <div style={{ marginTop: 4, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+                      color: tagColor || color, background: `${tagColor || color}18`,
+                      display: 'inline-block', padding: '2px 7px', borderRadius: 10 }}>
+          {tag}
+        </div>
+      )}
     </div>
   );
 }
