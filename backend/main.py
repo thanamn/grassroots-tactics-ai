@@ -192,7 +192,7 @@ def regenerate_explanation(job_id: str, lang: str = "en"):
         # Surface the failure to the job record so the dashboard reflects it.
         job["explainer_error"] = f"{type(e).__name__}: {e}"
         save_job(job)
-        raise HTTPException(502, f"Gemini call failed: {e}")
+        raise HTTPException(502, f"AI call failed: {e}")
 
     out = CACHE_DIR / f"{job_id}_explanation_{lang}.json"
     out.write_text(
@@ -237,7 +237,7 @@ def chat_endpoint(job_id: str, payload: dict = Body(...)):
     try:
         answer = chat(metrics, question, history=history, lang=lang)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"Gemini call failed: {e}")
+        raise HTTPException(502, f"AI call failed: {e}")
     return {"answer": answer}
 
 

@@ -175,6 +175,9 @@ def compute_metrics(tracking: dict) -> dict:
 
     events = _detect_events(per_frame)
 
+    from src.ball_metrics import compute_ball_metrics
+    ball_metrics = compute_ball_metrics(tracking)
+
     return {
         "clip_id": tracking["clip_id"],
         "fps": tracking["fps"],
@@ -182,6 +185,7 @@ def compute_metrics(tracking: dict) -> dict:
         "per_frame": per_frame,
         "summary": summary,
         "events": events,
+        "ball_metrics": ball_metrics,   # None when ball data is absent or insufficient
     }
 
 

@@ -1,8 +1,8 @@
-"""Call Gemini with a tactical-explainer prompt, return parsed explanation.
+"""Call DeepSeek with a tactical-explainer prompt, return parsed explanation.
 
-Uses the modern google-genai SDK (NOT the deprecated google-generativeai).
-Gemini's response_schema feature forces strictly-structured JSON output,
-so we don't need fragile regex parsing of free-form replies.
+Uses the openai SDK pointed at DeepSeek's OpenAI-compatible API endpoint.
+JSON output is requested via response_format={"type": "json_object"} and
+validated against the required keys after parsing.
 
 Usage (CLI):
     python -m src.explainer --input data/cache/sample_metrics.json
@@ -15,79 +15,62 @@ import time
 from pathlib import Path
 from typing import Literal
 
-from src.config import CACHE_DIR, GEMINI_API_KEY, GEMINI_MODEL
+import openai
+
+from src.config import CACHE_DIR, DEEPSEEK_API_KEY, DEEPSEEK_MODEL
 from prompts.tactical_explainer import PROMPT_VERSION, build_messages
 
 Lang = Literal["en", "th"]
 
-# Gemini's free-tier 2.5-flash regularly returns 503 / 429 under load.
-# These are transient — the same call typically succeeds on retry. We
-# back off exponentially so a brief outage doesn't fail the user-facing
-# pipeline. After RETRY_DELAYS is exhausted we re-raise so the caller
-# (pipeline_runner) can surface the real reason on the job record.
+# DeepSeek free/paid tier can return 429 (rate limit) or 503 (overloaded)
+# under load. Back off exponentially; re-raise on permanent errors.
 RETRY_DELAYS = (2.0, 6.0, 18.0)   # ~26 s total worst-case
 RETRY_STATUS_HINTS = ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED",
                       "DEADLINE_EXCEEDED", "INTERNAL")
 
 
 def _is_transient(exc: Exception) -> bool:
-    """True if the exception looks like a transient API hiccup worth retrying.
-
-    The google-genai SDK raises typed exceptions (ServerError, ClientError,
-    APIError) but the cleanest portable check is just to look at the
-    string form for known transient codes — that survives SDK refactors.
-    """
+    """True if the exception looks like a transient API hiccup worth retrying."""
+    # openai SDK raises APIStatusError with a status_code attribute
+    if hasattr(exc, "status_code") and exc.status_code in (429, 502, 503):
+        return True
     s = repr(exc)
     return any(hint in s for hint in RETRY_STATUS_HINTS)
 
 
 def explain(metrics: dict, phase_context: str = "general open play",
             lang: Lang = "en", max_tokens: int = 600) -> dict:
-    """Send metrics → Gemini → parsed explanation dict."""
-    if not GEMINI_API_KEY:
+    """Send metrics → DeepSeek → parsed explanation dict."""
+    if not DEEPSEEK_API_KEY:
         raise RuntimeError(
-            "GEMINI_API_KEY not set. Copy .env.example to .env and add your key. "
-            "Get a free key at https://aistudio.google.com/apikey"
+            "DEEPSEEK_API_KEY not set. Copy .env.example to .env and add your key."
         )
 
-    # Lazy import so the rest of the project still imports without google-genai installed
-    from google import genai
-    from google.genai import types
-
-    # Build schema using types.Schema — plain dict doesn't enforce structured output reliably
-    schema = types.Schema(
-        type=types.Type.OBJECT,
-        properties={
-            "headline":     types.Schema(type=types.Type.STRING),
-            "implication":  types.Schema(type=types.Type.STRING),
-            "coaching_cue": types.Schema(type=types.Type.STRING),
-        },
-        required=["headline", "implication", "coaching_cue"],
-    )
-
     system, user_msg = build_messages(metrics, phase_context=phase_context, lang=lang)
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    cfg = types.GenerateContentConfig(
-        system_instruction=system,
-        response_mime_type="application/json",
-        response_schema=schema,
-        # Gemini 2.5 Flash uses thinking tokens by default; disable them so
-        # the full token budget goes to the actual JSON output.
-        thinking_config=types.ThinkingConfig(thinking_budget=0),
-        max_output_tokens=max_tokens,
-        temperature=0.6,
+    # DeepSeek requires the word "json" in the prompt when response_format=json_object.
+    user_msg = user_msg + "\n\nRespond with a JSON object only."
+
+    client = openai.OpenAI(
+        api_key=DEEPSEEK_API_KEY,
+        base_url="https://api.deepseek.com",
     )
 
-    # Retry on transient 5xx / rate-limit errors. A 503 on the second
-    # of two back-to-back calls (en then th in the pipeline) was the
-    # original symptom that motivated this loop. Permanent errors
-    # (auth, quota, schema-mismatch) propagate immediately.
+    # Retry on transient 5xx / rate-limit errors. Permanent errors
+    # (auth, quota) propagate immediately.
     attempts = len(RETRY_DELAYS) + 1
     last_exc: Exception | None = None
+    response = None
     for i in range(attempts):
         try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL, contents=user_msg, config=cfg,
+            response = client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user_msg},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=max_tokens,
+                temperature=0.6,
             )
             break
         except Exception as e:  # noqa: BLE001
@@ -95,20 +78,25 @@ def explain(metrics: dict, phase_context: str = "general open play",
             if i == attempts - 1 or not _is_transient(e):
                 raise
             time.sleep(RETRY_DELAYS[i])
-    else:  # pragma: no cover — only reached if the loop never breaks
+    else:  # pragma: no cover
         raise last_exc  # type: ignore[misc]
 
-    raw = response.text or ""
-    parsed = json.loads(raw)   # guaranteed valid JSON because of response_schema
+    raw = (response.choices[0].message.content or "") if response else ""
+    parsed = json.loads(raw)
+
+    required = ("headline", "implication", "coaching_cue")
+    missing = [k for k in required if k not in parsed]
+    if missing:
+        raise ValueError(f"DeepSeek response missing keys: {missing}. Raw: {raw[:200]}")
 
     return {
-        "clip_id": metrics["clip_id"],
+        "clip_id": metrics.get("clip_id", ""),
         "phase_context": phase_context,
         "language": lang,
-        "model": GEMINI_MODEL,
+        "model": DEEPSEEK_MODEL,
         "prompt_version": PROMPT_VERSION,
-        "headline": parsed["headline"],
-        "implication": parsed["implication"],
+        "headline":     parsed["headline"],
+        "implication":  parsed["implication"],
         "coaching_cue": parsed["coaching_cue"],
         "raw_response": raw,
     }
@@ -125,7 +113,8 @@ def main() -> None:
     metrics = json.loads(Path(args.input).read_text())
     result = explain(metrics, phase_context=args.phase, lang=args.lang)
 
-    out_path = Path(args.output) if args.output else CACHE_DIR / f"{metrics['clip_id']}_explanation_{args.lang}.json"
+    out_path = (Path(args.output) if args.output
+                else CACHE_DIR / f"{metrics['clip_id']}_explanation_{args.lang}.json")
     out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Wrote {out_path}")
     print()

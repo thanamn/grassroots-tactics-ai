@@ -27,10 +27,11 @@ PITCH_WIDTH_M = 68.0
 # Football-specific YOLOv8 weights (huggingface: uisikdag/yolo-v8-football-players-detection).
 # Classes: 0=ball, 1=goalkeeper, 2=player, 3=referee. We track only outfield
 # players + GK so the convex hull is built from the team, not officials.
-YOLO_MODEL = str(ROOT / "models" / "football_players.pt")
+_football_model = ROOT / "models" / "football_players.pt"
+YOLO_MODEL = str(_football_model) if _football_model.exists() else "yolo11n.pt"
 TRACKER_CONFIG = "bytetrack.yaml"
-TRACK_CLASSES = [1, 2]   # goalkeeper + player; deliberately excludes ball and referee
+TRACK_CLASSES = [0, 1, 2]   # ball + goalkeeper + player; deliberately excludes referee
 
 # --- LLM ---------------------------------------------------------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL   = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")

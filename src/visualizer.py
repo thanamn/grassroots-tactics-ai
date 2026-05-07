@@ -129,6 +129,12 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
         smoothed = _smoothed_teams(frames_by_idx, frame_idx, window=window)
         for team, color in TEAM_COLORS.items():
             _draw_team(frame, smoothed.get(team, []), color)
+        # Draw a dot at each player's foot position so excluded/edge players
+        # are visible — makes the tracking transparent for the user study.
+        for team, color in TEAM_COLORS.items():
+            for x, y in smoothed.get(team, []):
+                cv2.circle(frame, (int(x), int(y)), 4, color, -1)
+                cv2.circle(frame, (int(x), int(y)), 4, (0, 0, 0), 1)
         writer.write(frame)
         frame_idx += 1
 

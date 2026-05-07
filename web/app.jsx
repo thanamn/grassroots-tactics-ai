@@ -84,8 +84,8 @@ const T = {
     chatPlaceholder: 'Try "what should I fix in our spacing?"',
     chatSend: 'Send',
     chatClear: 'Clear chat',
-    chatThinking: 'Asking Gemini…',
-    chatError: 'Could not reach Gemini. Try again in a moment.',
+    chatThinking: 'Thinking…',
+    chatError: 'Could not reach AI. Try again in a moment.',
     snapshot: 'Match snapshot',
     teamA: 'Team A spread',
     teamB: 'Team B spread',
@@ -99,9 +99,16 @@ const T = {
     stretchNote: 'creating space — opponents can exploit gaps',
     compressNote: 'defending tight — harder to play through',
     noEvents: 'No sudden shape changes detected in this clip.',
-    explainerMissing: 'Explanation not available — Gemini probably rate-limited. Try again.',
+    explainerMissing: 'Explanation not available — AI may be rate-limited. Try again.',
     explainerRetry: 'Retry explanation',
-    explainerRetrying: 'Asking Gemini…',
+    explainerRetrying: 'Thinking…',
+    possA: 'Team A possession',
+    possB: 'Team B possession',
+    passCtA: 'Team A passes',
+    passCtB: 'Team B passes',
+    passAccA: 'Team A pass acc.',
+    passAccB: 'Team B pass acc.',
+    possTitle: 'Possession & Passing',
     error: 'Something went wrong',
     delete: 'Delete',
     confirmDelete: 'Delete this analysis and all artefacts?',
@@ -156,7 +163,7 @@ const T = {
     chatSend: 'ส่ง',
     chatClear: 'ล้างแชท',
     chatThinking: 'กำลังคิด…',
-    chatError: 'ติดต่อ Gemini ไม่ได้ ลองอีกครั้งในอีกสักครู่',
+    chatError: 'ติดต่อ AI ไม่ได้ ลองอีกครั้งในอีกสักครู่',
     snapshot: 'ภาพรวมการแข่ง',
     teamA: 'พื้นที่เฉลี่ยทีม A',
     teamB: 'พื้นที่เฉลี่ยทีม B',
@@ -170,9 +177,16 @@ const T = {
     stretchNote: 'เปิดช่องว่าง — คู่แข่งใช้ประโยชน์ได้',
     compressNote: 'ป้องกันแน่น — คู่แข่งเล่นผ่านยาก',
     noEvents: 'ไม่พบการเปลี่ยนรูปแบบอย่างชัดเจนในคลิปนี้',
-    explainerMissing: 'ยังไม่มีคำอธิบาย — Gemini อาจถูกจำกัดอัตรา ลองอีกครั้งได้',
+    explainerMissing: 'ยังไม่มีคำอธิบาย — AI อาจถูกจำกัดอัตรา ลองอีกครั้งได้',
     explainerRetry: 'ลองสร้างคำอธิบายใหม่',
-    explainerRetrying: 'กำลังเรียก Gemini…',
+    explainerRetrying: 'กำลังคิด…',
+    possA: 'ครองบอลทีม A',
+    possB: 'ครองบอลทีม B',
+    passCtA: 'ส่งบอลทีม A',
+    passCtB: 'ส่งบอลทีม B',
+    passAccA: 'ความแม่นทีม A',
+    passAccB: 'ความแม่นทีม B',
+    possTitle: 'การครองบอล & การส่งบอล',
     error: 'มีบางอย่างผิดพลาด',
     delete: 'ลบ',
     confirmDelete: 'ลบการวิเคราะห์และไฟล์ที่เกี่ยวข้องทั้งหมด?',
@@ -780,6 +794,11 @@ function Analysis({ setScreen, lang, jobId }) {
   const stretchCount = events.filter((e) => e.type === 'stretch').length;
   const compressCount = events.filter((e) => e.type === 'compactness_spike').length;
 
+  const ball   = metrics.ball_metrics || {};
+  const poss   = ball.possession_pct || {};
+  const passes = ball.pass_count || {};
+  const acc    = ball.pass_accuracy || {};
+
   const jumpTo = (t) => {
     if (videoRef.current) {
       videoRef.current.currentTime = t;
@@ -857,6 +876,21 @@ function Analysis({ setScreen, lang, jobId }) {
                 {t.unitNote}
               </div>
             </div>
+
+            {/* Possession & pass card — only renders when ball data is available */}
+            {Object.keys(poss).length > 0 && (
+              <div className="card" style={{ padding: 20 }}>
+                <div style={{ fontSize: 11, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{t.possTitle}</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <MiniStat label={t.possA}   value={`${(poss.A  || 0).toFixed(0)}%`}  color={C.teamA} />
+                  <MiniStat label={t.possB}   value={`${(poss.B  || 0).toFixed(0)}%`}  color={C.teamB} />
+                  <MiniStat label={t.passCtA} value={passes.A != null ? passes.A : '–'} color={C.teamA} />
+                  <MiniStat label={t.passCtB} value={passes.B != null ? passes.B : '–'} color={C.teamB} />
+                  <MiniStat label={t.passAccA} value={acc.A != null ? `${(acc.A * 100).toFixed(0)}%` : '–'} color={C.teamA} />
+                  <MiniStat label={t.passAccB} value={acc.B != null ? `${(acc.B * 100).toFixed(0)}%` : '–'} color={C.teamB} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -32,8 +32,11 @@ import argparse
 import json
 from pathlib import Path
 
+import math
+
 import cv2
 import numpy as np
+import pandas as pd
 import torch
 from scipy.optimize import linear_sum_assignment
 from ultralytics import YOLO
@@ -157,9 +160,13 @@ def run_tracking(video_path: Path, model_name: str | None = None,
     frame_count_meta = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
 
+    # yolo11n.pt uses COCO classes (0 = person, not ball) — only trust ball
+    # detections from the football-specific weights.
+    model_has_ball = "yolo11n" not in str(model_name)
+
     gpu_name = torch.cuda.get_device_name(0) if DEVICE != 'cpu' else 'CPU only'
     print(f"[tracking] device={DEVICE!r} ({gpu_name}) "
-          f"model={model_name} vid_stride={vid_stride}")
+          f"model={model_name} vid_stride={vid_stride} ball={model_has_ball}")
     results = model.predict(
         source=str(video_path),
         classes=TRACK_CLASSES,
@@ -169,18 +176,29 @@ def run_tracking(video_path: Path, model_name: str | None = None,
         vid_stride=vid_stride,
     )
 
-    frames = []
+    frames: list[dict] = []
+    ball_raw: list[dict | None] = []   # one entry per processed frame, None = not seen
+
     # When vid_stride > 1, ultralytics yields one result per *processed*
     # frame, so the loop index i maps back to the original video frame
     # number via ``i * vid_stride``. We store the original frame number
     # so downstream stages keep their existing per-frame timestamp logic.
     for i, result in enumerate(results):
         frame_idx = i * vid_stride
-        boxes_xyxy = (result.boxes.xyxy.cpu().numpy()
-                      if result.boxes is not None and len(result.boxes) > 0
-                      else np.empty((0, 4)))
 
-        tracks = tracker.update(boxes_xyxy)
+        # Split detections: players (class 1, 2) vs ball (class 0)
+        if model_has_ball and result.boxes is not None and len(result.boxes) > 0:
+            cls  = result.boxes.cls.cpu().numpy().astype(int)
+            xyxy = result.boxes.xyxy.cpu().numpy()
+            player_boxes = xyxy[np.isin(cls, [1, 2])]
+            ball_boxes   = xyxy[cls == 0]
+        else:
+            player_boxes = (result.boxes.xyxy.cpu().numpy()
+                            if result.boxes is not None and len(result.boxes) > 0
+                            else np.empty((0, 4)))
+            ball_boxes = np.empty((0, 4))
+
+        tracks = tracker.update(player_boxes)
         players = []
         for tid, (x1, y1, x2, y2) in tracks:
             players.append({
@@ -193,13 +211,41 @@ def run_tracking(video_path: Path, model_name: str | None = None,
                 "y": float(y2),
                 "bbox": [float(x1), float(y1), float(x2), float(y2)],
             })
+
+        # Ball: take highest-confidence detection (first box) when visible.
+        if len(ball_boxes) > 0:
+            bx1, by1, bx2, by2 = ball_boxes[0]
+            ball_raw.append({"x": float((bx1 + bx2) / 2), "y": float((by1 + by2) / 2)})
+        else:
+            ball_raw.append(None)
+
         frames.append({"frame": frame_idx, "t": frame_idx / fps, "players": players})
 
-        # Print every 100 processed frames, not every 100 source frames —
-        # otherwise stride=5 only logs every 500-frame block which is
-        # unhelpfully sparse.
+        # Print every 100 processed frames, not every 100 source frames.
         if i % 100 == 0:
             print(f"  frame {frame_idx}/{frame_count_meta} — {len(players)} players")
+
+    # Interpolate short ball-detection gaps (e.g. brief occlusions) so
+    # downstream possession metrics don't see artificial dropouts. Gaps longer
+    # than BALL_LOST_PATIENCE frames stay null — the ball is genuinely lost.
+    BALL_LOST_PATIENCE = 30
+    _nan = {"x": float("nan"), "y": float("nan")}
+    if ball_raw and any(b is not None for b in ball_raw):
+        # Replace None with NaN-dict so pandas gets a uniform list of dicts.
+        df_ball = pd.DataFrame([b if b is not None else _nan for b in ball_raw])
+        # Only interpolate within runs of detections — don't fill leading/
+        # trailing nulls (ball off-screen). limit= caps gap fill at patience.
+        df_ball = df_ball.interpolate(method="linear", limit=BALL_LOST_PATIENCE)
+        ball_interp = df_ball.to_dict("records")
+    else:
+        ball_interp = [None] * len(ball_raw)
+
+    for idx, frame in enumerate(frames):
+        b = ball_interp[idx] if idx < len(ball_interp) else None
+        if b and not math.isnan(b.get("x", float("nan"))):
+            frame["ball"] = b
+        else:
+            frame["ball"] = None
 
     return {
         "clip_id": video_path.stem,

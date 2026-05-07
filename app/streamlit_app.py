@@ -430,6 +430,13 @@ T = {
         "compress_verb": "compressed",
         "stretch_note": "creating space — opponents can exploit the gaps",
         "compress_note": "defending tight — harder for opponents to play through",
+        "poss_title": "Possession & Passing",
+        "poss_a": "Team A possession",
+        "poss_b": "Team B possession",
+        "pass_ct_a": "Team A passes",
+        "pass_ct_b": "Team B passes",
+        "pass_acc_a": "Team A pass acc.",
+        "pass_acc_b": "Team B pass acc.",
     },
     "th": {
         "hero_eyebrow": "AI วิเคราะห์การยืนตำแหน่งของทีม",
@@ -481,6 +488,13 @@ T = {
         "compress_verb": "บีบเข้ามา",
         "stretch_note": "เปิดช่องว่าง — คู่แข่งใช้ประโยชน์จากช่องว่างได้",
         "compress_note": "ป้องกันแน่น — คู่แข่งเล่นผ่านได้ยาก",
+        "poss_title": "การครองบอล & การส่งบอล",
+        "poss_a": "ครองบอลทีม A",
+        "poss_b": "ครองบอลทีม B",
+        "pass_ct_a": "ส่งบอลทีม A",
+        "pass_ct_b": "ส่งบอลทีม B",
+        "pass_acc_a": "ความแม่นทีม A",
+        "pass_acc_b": "ความแม่นทีม B",
     },
 }
 t = T[lang]
@@ -601,6 +615,25 @@ m1.metric(t["team_a_spread"], f"{a_mean / 1_000:.0f} k px²", help=t["team_a_hel
 m2.metric(t["team_b_spread"], f"{b_mean / 1_000:.0f} k px²", help=t["team_b_help"])
 m3.metric(t["gap"], f"{cd_mean:.0f} px", help=t["gap_help"])
 m4.metric(t["events_count"], len(events), help=t["events_help"])
+
+# Possession & pass metrics — only shown when ball tracking produced data
+ball_m  = metrics.get("ball_metrics") or {}
+poss    = ball_m.get("possession_pct") or {}
+passes  = ball_m.get("pass_count") or {}
+acc     = ball_m.get("pass_accuracy") or {}
+
+if poss:
+    st.markdown(
+        f"""<div class="gt-section-h"><h3>{html.escape(t['poss_title'])}</h3></div>""",
+        unsafe_allow_html=True,
+    )
+    p1, p2, p3, p4, p5, p6 = st.columns(6)
+    p1.metric(t["poss_a"],    f"{poss.get('A',  0):.0f}%")
+    p2.metric(t["poss_b"],    f"{poss.get('B',  0):.0f}%")
+    p3.metric(t["pass_ct_a"], str(passes.get("A", "–")))
+    p4.metric(t["pass_ct_b"], str(passes.get("B", "–")))
+    p5.metric(t["pass_acc_a"], f"{acc['A']*100:.0f}%" if acc.get("A") is not None else "–")
+    p6.metric(t["pass_acc_b"], f"{acc['B']*100:.0f}%" if acc.get("B") is not None else "–")
 
 # Coaches will ask "what's a px²?". Spelling it out once below the cards is
 # cheaper than discovering this in user-study session 3.

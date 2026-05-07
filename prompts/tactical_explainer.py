@@ -23,44 +23,45 @@ from __future__ import annotations
 import json
 from typing import Literal
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 Lang = Literal["en", "th"]
 
 
 SYSTEM_PROMPT_EN = """You are a tactical analyst who helps GRASSROOTS football coaches \
-(volunteer coaches, school teams, amateur clubs) understand their team's spacing \
-and compactness from video clips.
+(volunteer coaches, school teams, amateur clubs) understand their team's spacing, \
+compactness, ball possession, and passing from video clips.
 
 Style rules — these are strict:
 - Plain language. Imagine the coach has played the game but never read an \
 analytics paper.
 - Avoid jargon: do NOT use "expected goals", "PPDA", "xT", "Voronoi", "exp-G", \
 "line-breaking", "half-spaces", or other elite-analytics terms.
-- "Compactness" and "shape" are OK because coaches use them.
+- "Compactness", "shape", "possession", and "passing" are OK because coaches use them.
 - Always tie a metric to something the coach can SEE on the pitch.
 - Be specific about WHEN it happened (use the timestamps you are given).
 - One concrete coaching cue at the end. No essays. No lists of cues.
 
 You will receive: summary statistics for both teams over a short clip, \
-plus detected "events" (moments of sharp compactness change). \
+plus detected "events" (moments of sharp compactness change), and optional \
+ball possession and passing data. \
 You must produce three short fields: headline, implication, coaching_cue. \
 Each field must follow the style rules above."""
 
 
 SYSTEM_PROMPT_TH = """คุณคือนักวิเคราะห์แทคติกที่ช่วยให้โค้ชฟุตบอลรากหญ้า \
-(โค้ชอาสา ทีมโรงเรียน ทีมสมัครเล่น) เข้าใจเรื่อง spacing และ compactness \
-ของทีมจากคลิปวิดีโอสั้นๆ
+(โค้ชอาสา ทีมโรงเรียน ทีมสมัครเล่น) เข้าใจเรื่อง spacing, compactness, \
+การครองบอล และการส่งบอลของทีมจากคลิปวิดีโอสั้นๆ
 
 กฎการเขียน (เคร่งครัด):
 - ใช้ภาษาธรรมดา สมมติว่าโค้ชเคยเล่นบอลแต่ไม่เคยอ่าน paper วิเคราะห์
 - ห้ามใช้ศัพท์เฉพาะ: "expected goals", "PPDA", "xT", "Voronoi", "half-space" ฯลฯ
-- คำว่า "compactness" หรือ "ระยะห่าง" ใช้ได้
+- คำว่า "compactness", "ระยะห่าง", "ครองบอล", "ส่งบอล" ใช้ได้
 - เชื่อม metric เข้ากับสิ่งที่โค้ชจะมองเห็นในสนามได้
 - ระบุเวลาที่เกิดเหตุการณ์ให้ชัด
 - ปิดท้ายด้วยคำแนะนำเชิงปฏิบัติ 1 ข้อ ไม่ต้องเขียนเป็นเรียงความ
 
-คุณจะได้รับ: สถิติสรุปของทั้งสองทีม + เหตุการณ์ที่ระบบตรวจพบ \
+คุณจะได้รับ: สถิติสรุปของทั้งสองทีม + เหตุการณ์ที่ระบบตรวจพบ + ข้อมูลครองบอลและส่งบอล \
 ให้ผลลัพธ์ 3 ฟิลด์: headline, implication, coaching_cue \
 แต่ละฟิลด์ต้องเป็นไปตามกฎด้านบน"""
 
@@ -130,7 +131,7 @@ def _format_events(events: list[dict], lang: Lang) -> str:
 
 def build_messages(metrics: dict, phase_context: str = "general open play",
                    lang: Lang = "en") -> tuple[str, str]:
-    """Return (system_prompt, user_message) ready to send to Claude."""
+    """Return (system_prompt, user_message) ready to send to the LLM."""
     s = metrics["summary"]
     a = s["team_A"]["hull_area"]
     b = s["team_B"]["hull_area"]
@@ -151,6 +152,36 @@ def build_messages(metrics: dict, phase_context: str = "general open play",
         cd_mean=cd["mean"], cd_min=cd["min"], cd_max=cd["max"],
         events_block=_format_events(metrics["events"], lang),
     )
+
+    # Append ball possession/pass data when available
+    ball_m = metrics.get("ball_metrics") or {}
+    poss   = ball_m.get("possession_pct") or {}
+    passes = ball_m.get("pass_count") or {}
+    acc    = ball_m.get("pass_accuracy") or {}
+
+    if poss:
+        def _fmt_acc(team: str) -> str:
+            v = acc.get(team)
+            return f"{v*100:.0f}%" if v is not None else "–"
+
+        if lang == "th":
+            ball_block = (
+                f"\nการครองบอล (ประมาณ): ทีม A {poss.get('A', 0):.0f}% · "
+                f"ทีม B {poss.get('B', 0):.0f}%\n"
+                f"การส่งบอล: ทีม A {passes.get('A', '?')} ครั้ง · "
+                f"ทีม B {passes.get('B', '?')} ครั้ง\n"
+                f"ความแม่นยำส่งบอล: ทีม A {_fmt_acc('A')} · ทีม B {_fmt_acc('B')}"
+            )
+        else:
+            ball_block = (
+                f"\nBall possession (approx): Team A {poss.get('A', 0):.0f}% · "
+                f"Team B {poss.get('B', 0):.0f}%\n"
+                f"Passes (intra-team transfers): Team A {passes.get('A', '?')} · "
+                f"Team B {passes.get('B', '?')}\n"
+                f"Pass accuracy: Team A {_fmt_acc('A')} · Team B {_fmt_acc('B')}"
+            )
+        user_msg = user_msg + ball_block
+
     return system, user_msg
 
 

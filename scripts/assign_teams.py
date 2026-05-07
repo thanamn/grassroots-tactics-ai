@@ -35,25 +35,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import TRACKING_DIR, CLIPS_DIR
 
 SAMPLE_EVERY = 5          # use every Nth frame for k-means fitting
-JERSEY_TOP    = 0.25      # skip top 25 % of bbox (head)
-JERSEY_BOTTOM = 0.65      # stop at 65 % of bbox (waist)
+JERSEY_TOP    = 0.15      # skip top 15 % of bbox (head)
+JERSEY_BOTTOM = 0.50      # stop at 50 % of bbox — shirt zone, above shorts
 MIN_CROP_PX   = 4         # ignore tiny boxes
 
 # Players whose jersey a*b* is farther than this from the nearest cluster
 # centre are treated as non-players (goalkeeper different colour, referee).
-# Set to 0 to disable.  Tune by inspecting the cluster centre printout —
-# a good value is ~75–80 % of half the inter-cluster distance.
-OUTLIER_THRESH = 25.0
+# Set to 0 to disable.
+OUTLIER_THRESH = 40.0
+
+# If the smallest k=3 cluster contains at least this fraction of players,
+# there is no obvious outlier group → fall back to k=2 assignment.
+REFEREE_CLUSTER_MAX_FRAC = 0.30
 
 
 def _jersey_lab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
-    """Return median (L*, a*, b*) of the jersey zone, or None if crop is too small.
+    """Return median (L*, a*, b*) of non-grass jersey pixels, or None.
 
-    All three channels are returned so that outlier detection can use lightness
-    (L*) in addition to hue (a*b*). k-means is still fitted on a*b* only to
-    stay robust against lighting variation, but the goalkeeper's bright green
-    and the referee's distinct shade are far enough in 3-D L*a*b* space to be
-    reliably excluded.
+    Crops the shirt zone (JERSEY_TOP–JERSEY_BOTTOM of bbox), masks out
+    pitch-green pixels in HSV space, then computes per-channel median in
+    L*a*b*. Grass masking prevents pitch bleed from biasing the colour
+    estimate, especially when players are partially obscured or on the edge.
     """
     x1, y1, x2, y2 = (int(v) for v in bbox)
     h = y2 - y1
@@ -62,45 +64,67 @@ def _jersey_lab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
     crop = frame_bgr[jy1:jy2, x1:x2]
     if crop.size < MIN_CROP_PX * MIN_CROP_PX * 3:
         return None
-    lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
+
+    # Mask out grass-coloured pixels before computing jersey colour
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    grass_mask = (
+        (hsv[:, :, 0] >= 35) & (hsv[:, :, 0] <= 85) &  # green hue
+        (hsv[:, :, 1] > 60) &                             # saturated
+        (hsv[:, :, 2] > 40)                               # not too dark
+    )
+    pixels_bgr = crop.reshape(-1, 3)[~grass_mask.reshape(-1)]
+    if len(pixels_bgr) < MIN_CROP_PX:
+        # Almost entirely grass — fall back to full crop
+        pixels_bgr = crop.reshape(-1, 3)
+
+    # Compute median in L*a*b* on the surviving pixels
+    lab_pixels = cv2.cvtColor(
+        pixels_bgr.reshape(-1, 1, 3).astype(np.uint8), cv2.COLOR_BGR2LAB
+    ).reshape(-1, 3)
     return np.array([
-        float(np.median(lab[:, :, 0])),   # L*
-        float(np.median(lab[:, :, 1])),   # a*
-        float(np.median(lab[:, :, 2])),   # b*
+        float(np.median(lab_pixels[:, 0])),   # L*
+        float(np.median(lab_pixels[:, 1])),   # a*
+        float(np.median(lab_pixels[:, 2])),   # b*
     ])
 
 
-def _kmeans2(X: np.ndarray, n_init: int = 10, max_iter: int = 100,
-             seed: int = 42) -> np.ndarray:
-    """Lloyd's algorithm k=2, pure numpy — avoids sklearn/OpenBLAS DLL crash."""
+def _kmeans_k(X: np.ndarray, k: int = 2, n_init: int = 10, max_iter: int = 100,
+              seed: int = 42) -> tuple[np.ndarray, np.ndarray]:
+    """Lloyd's algorithm with k clusters, pure numpy — no sklearn/OpenBLAS DLL.
+
+    Returns (centres, labels) where centres has shape (k, d) and labels has
+    shape (N,) with values in range(k).
+    """
     rng = np.random.default_rng(seed)
     best_centres: np.ndarray | None = None
+    best_labels:  np.ndarray | None = None
     best_inertia = float("inf")
 
     for _ in range(n_init):
-        idx = rng.choice(len(X), size=2, replace=False)
+        idx = rng.choice(len(X), size=k, replace=False)
         centres = X[idx].astype(float)
 
         for _ in range(max_iter):
-            dists = np.linalg.norm(X[:, None, :] - centres[None, :, :], axis=2)
+            dists  = np.linalg.norm(X[:, None, :] - centres[None, :, :], axis=2)
             labels = np.argmin(dists, axis=1)
             new_centres = np.array([
-                X[labels == k].mean(axis=0) if (labels == k).any() else centres[k]
-                for k in range(2)
+                X[labels == c].mean(axis=0) if (labels == c).any() else centres[c]
+                for c in range(k)
             ])
             if np.allclose(new_centres, centres):
                 break
             centres = new_centres
 
         inertia = sum(
-            np.sum((X[labels == k] - centres[k]) ** 2)
-            for k in range(2) if (labels == k).any()
+            float(np.sum((X[labels == c] - centres[c]) ** 2))
+            for c in range(k) if (labels == c).any()
         )
         if inertia < best_inertia:
             best_inertia = inertia
             best_centres = centres.copy()
+            best_labels  = labels.copy()
 
-    return best_centres  # shape (2, 2)
+    return best_centres, best_labels  # type: ignore[return-value]
 
 
 def assign_teams(tracking_path: Path, video_path: Path) -> None:
@@ -142,31 +166,51 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
     lab_arr = np.array(lab_samples)   # (N, 3)  L*, a*, b*
     ab_arr  = lab_arr[:, 1:]          # (N, 2)  a*, b* — used for k-means
 
-    # ── k-means with k=2 on a*b* (pure numpy, no sklearn DLL issues) ────────
-    print(f"  {len(lab_samples)} jersey samples collected, fitting k-means …")
-    centres = _kmeans2(ab_arr, n_init=10, max_iter=100, seed=42)
+    # ── DBSCAN on a*b* — no need to guess k, outliers become noise (-1) ────────
+    # Falls back to k-means k=2 when sklearn is absent or DBSCAN yields < 2 clusters.
+    print(f"  {len(lab_samples)} jersey samples collected, fitting DBSCAN …")
+    try:
+        from sklearn.cluster import DBSCAN as _DBSCAN
+        db = _DBSCAN(eps=22, min_samples=3, metric="euclidean").fit(ab_arr)
+        raw_labels  = db.labels_          # -1 = noise/outlier
+        cluster_ids = [l for l in np.unique(raw_labels) if l != -1]
+    except ImportError:
+        cluster_ids = []                  # force k-means fallback
 
-    # Deterministic label: cluster with lower a* → "A", other → "B"
-    # (arbitrary but consistent within a clip)
-    if centres[0, 0] <= centres[1, 0]:
-        team_map = {0: "A", 1: "B"}
+    if len(cluster_ids) >= 2:
+        sizes = {l: int((raw_labels == l).sum()) for l in cluster_ids}
+        top2  = sorted(sizes, key=sizes.get, reverse=True)[:2]  # two largest
+        centres3  = np.array([ab_arr[raw_labels == l].mean(axis=0) for l in top2])
+        labels3   = np.full(len(ab_arr), -1, dtype=int)
+        labels3[raw_labels == top2[0]] = 0
+        labels3[raw_labels == top2[1]] = 1
+        team_clusters = [0, 1]
+        print(f"  DBSCAN: {len(cluster_ids)} clusters found; using top-2 as teams "
+              f"(sizes {sizes[top2[0]]}, {sizes[top2[1]]}; "
+              f"{int((raw_labels == -1).sum())} noise points)")
     else:
-        team_map = {0: "B", 1: "A"}
+        print(f"  DBSCAN found < 2 clusters — falling back to k-means k=2 …")
+        centres3, labels3 = _kmeans_k(ab_arr, k=2, n_init=10, max_iter=100, seed=42)
+        team_clusters = [0, 1]
 
-    # Build 3-D cluster centres (L*a*b*) by averaging L* of samples in each cluster
-    labels_2d = np.argmin(
-        np.linalg.norm(ab_arr[:, None, :] - centres[None, :, :], axis=2), axis=1
-    )
+    # Deterministic labelling: cluster with lower a* → "A", other → "B"
+    tc0, tc1 = team_clusters[0], team_clusters[1]
+    if centres3[tc0, 0] <= centres3[tc1, 0]:
+        team_map = {tc0: "A", tc1: "B"}
+    else:
+        team_map = {tc0: "B", tc1: "A"}
+
+    # Build 3-D cluster centres (L*a*b*) for the team clusters
     centres_3d = np.array([
-        lab_arr[labels_2d == k].mean(axis=0) if (labels_2d == k).any()
-        else np.array([128.0, centres[k, 0], centres[k, 1]])
-        for k in range(2)
+        lab_arr[labels3 == c].mean(axis=0) if (labels3 == c).any()
+        else np.array([128.0, centres3[c, 0], centres3[c, 1]])
+        for c in team_clusters
     ])   # shape (2, 3)
 
-    inter_dist = float(np.linalg.norm(centres[0] - centres[1]))
-    print(f"  Cluster 0 -> Team {team_map[0]}  |  centre L*a*b* = {centres_3d[0].round(1)}")
-    print(f"  Cluster 1 -> Team {team_map[1]}  |  centre L*a*b* = {centres_3d[1].round(1)}")
-    print(f"  Inter-cluster distance (a*b*) = {inter_dist:.1f}  |  3-D outlier threshold = {OUTLIER_THRESH}")
+    inter_dist = float(np.linalg.norm(centres3[tc0] - centres3[tc1]))
+    print(f"  Team A centre L*a*b* = {centres_3d[0].round(1)}")
+    print(f"  Team B centre L*a*b* = {centres_3d[1].round(1)}")
+    print(f"  Inter-cluster distance (a*b*) = {inter_dist:.1f}  |  outlier threshold = {OUTLIER_THRESH}")
 
     # ── pass 2: assign every player in every frame ───────────────────────────
     print("Pass 2 — assigning team labels to all frames …")
@@ -199,17 +243,19 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
             lab = _jersey_lab(img, p["bbox"])
             if lab is None:
                 continue
-            # Outlier check in 3-D L*a*b* space — catches GK (bright green)
-            # and referee (distinct shade) that look similar in a*b* alone
+            # Outlier check — log distance but always fall through to assignment.
+            # Leaving team=None would exclude the player from the hull entirely;
+            # the GK exclusion in metrics/visualizer drops the furthest player
+            # per team, which is the correct place to handle the goalkeeper.
             if OUTLIER_THRESH > 0:
                 dists_3d = np.linalg.norm(centres_3d - lab, axis=1)
                 if float(np.min(dists_3d)) > OUTLIER_THRESH:
-                    p["team"] = None   # goalkeeper / referee — excluded
-                    continue
-            # Team assignment uses a*b* only (lighting-robust)
-            dists_2d = np.linalg.norm(centres - lab[1:], axis=1)
-            cluster = int(np.argmin(dists_2d))
-            p["team"] = team_map[cluster]
+                    pass  # assign to nearest team anyway — don't leave as null
+            # Team assignment: find nearest team cluster in a*b* space
+            team_ab = centres3[team_clusters]   # shape (2, 2)
+            dists_2d = np.linalg.norm(team_ab - lab[1:], axis=1)
+            best_tc   = team_clusters[int(np.argmin(dists_2d))]
+            p["team"] = team_map[best_tc]
             assigned += 1
 
     cap2.release()
