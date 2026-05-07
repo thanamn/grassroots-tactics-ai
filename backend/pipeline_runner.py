@@ -13,12 +13,12 @@ Pipeline stages:
     1. assign_teams  — k-means jersey colours  → tracking JSON in-place
     2. metrics       — hull / centroid / events → data/cache/<job_id>_metrics.json
     3. visualizer    — overlay MP4 → data/cache/<job_id>_overlay.mp4
-    4. explainer     — Gemini → data/cache/<job_id>_explanation_<lang>.json
+    4. explainer     — DeepSeek → data/cache/<job_id>_explanation_<lang>.json
                        (runs once for en, once for th — both languages
                        are pre-rendered so the language toggle on the
                        analysis screen is instant)
 
-The explainer step is wrapped so a missing GEMINI_API_KEY (or transient
+The explainer step is wrapped so a missing DEEPSEEK_API_KEY (or transient
 network failure) doesn't fail the whole job — the metrics + overlay are
 still useful without the AI text.
 """

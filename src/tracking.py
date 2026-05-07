@@ -102,7 +102,9 @@ class _CentroidTracker:
         def _dominant(track: dict) -> int:
             total = track.get("total_count", 1)
             gk    = track.get("gk_count", 0)
-            return 1 if total > 0 and gk / total > 0.40 else 2
+            # Require ≥5 frames before committing to GK label — prevents a
+            # linesman seen for 1–3 frames from getting a GK marker.
+            return 1 if total >= 5 and gk / total > 0.50 else 2
 
         track_ids = list(self._tracks.keys())
         if not track_ids:

@@ -44,9 +44,24 @@ MIN_CROP_PX   = 4         # ignore tiny boxes
 # Set to 0 to disable.
 OUTLIER_THRESH = 40.0
 
+# Broadcast/tactical shots always place the technical area and coaching staff
+# at the bottom of the frame. Any detection whose bounding-box bottom edge
+# (y2) exceeds this fraction of frame height is almost certainly a coach,
+# physio, or ball-boy standing behind the touchline — not a field player.
+# GKs (cls=1) are exempt so a GK guarding the near goal is never silenced.
+# Set to 1.0 to disable (e.g. ground-level grassroots clips where the
+# technical area is off-camera or at the frame edge horizontally).
+MAX_PLAYER_Y_FRAC = 0.90
+
 # If the smallest k=3 cluster contains at least this fraction of players,
 # there is no obvious outlier group → fall back to k=2 assignment.
 REFEREE_CLUSTER_MAX_FRAC = 0.30
+
+# When k-means a*b* separation between the two team centres is below this
+# threshold, retry clustering in full L*a*b* space. Night games (e.g. PSG
+# dark navy vs Arsenal white/red under floodlights) can look nearly identical
+# in hue (a*b*) but are clearly separated by luminance (L*).
+MIN_INTER_DIST = 12.0
 
 
 def _jersey_lab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
@@ -192,6 +207,20 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
         print(f"  DBSCAN found < 2 clusters — falling back to k-means k=2 …")
         centres3, labels3 = _kmeans_k(ab_arr, k=2, n_init=10, max_iter=100, seed=42)
         team_clusters = [0, 1]
+        inter_dist_ab = float(np.linalg.norm(centres3[0] - centres3[1]))
+        if inter_dist_ab < MIN_INTER_DIST:
+            # a*b* (hue) failed to separate the two kits — retry in full L*a*b*.
+            # Night games with dark-navy vs white kits (e.g. PSG vs Arsenal) are
+            # nearly identical in hue but clearly different in luminance (L*).
+            print(f"  a*b* separation {inter_dist_ab:.1f} < {MIN_INTER_DIST} — "
+                  f"retrying with L*a*b* (3-D) …")
+            centres_lab, labels_lab = _kmeans_k(lab_arr, k=2, n_init=10,
+                                                max_iter=100, seed=42)
+            inter_dist_lab = float(np.linalg.norm(centres_lab[0] - centres_lab[1]))
+            if inter_dist_lab > inter_dist_ab:
+                centres3 = centres_lab[:, 1:]   # a*b* slice — keeps label logic intact
+                labels3  = labels_lab
+                print(f"  L*a*b* separation {inter_dist_lab:.1f} — using 3-D result")
 
     # Deterministic labelling: cluster with lower a* → "A", other → "B"
     tc0, tc1 = team_clusters[0], team_clusters[1]
@@ -236,25 +265,34 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
             prev_img = img
             prev_fidx = fidx
 
+        frame_h = img.shape[0] if img is not None else None
         for p in frame_data["players"]:
             total += 1
             if img is None:
                 continue
+            # Y-boundary guard: reject detections whose bottom edge is below
+            # MAX_PLAYER_Y_FRAC of frame height. Technical-area staff (coaches,
+            # physios, ball-boys) always appear in this bottom strip on broadcast
+            # tactical shots. GKs are exempt so a near-post GK isn't silenced.
+            if MAX_PLAYER_Y_FRAC < 1.0 and p.get("cls") != 1:
+                y2 = p["bbox"][3]
+                if frame_h and y2 > frame_h * MAX_PLAYER_Y_FRAC:
+                    continue  # leave team=None
             lab = _jersey_lab(img, p["bbox"])
             if lab is None:
                 continue
-            # Outlier check — log distance but always fall through to assignment.
-            # Leaving team=None would exclude the player from the hull entirely;
-            # the GK exclusion in metrics/visualizer drops the furthest player
-            # per team, which is the correct place to handle the goalkeeper.
-            if OUTLIER_THRESH > 0:
+            # Outlier check: jersey colour is far from both team centres →
+            # almost certainly a referee, linesman, or sideline staff.
+            # GKs (cls=1) are exempt — their unusual kits legitimately differ
+            # from outfield players but they ARE part of one team.
+            if OUTLIER_THRESH > 0 and p.get("cls") != 1:
                 dists_3d = np.linalg.norm(centres_3d - lab, axis=1)
                 if float(np.min(dists_3d)) > OUTLIER_THRESH:
-                    pass  # assign to nearest team anyway — don't leave as null
-            # Team assignment: find nearest team cluster in a*b* space
-            team_ab = centres3[team_clusters]   # shape (2, 2)
-            dists_2d = np.linalg.norm(team_ab - lab[1:], axis=1)
-            best_tc   = team_clusters[int(np.argmin(dists_2d))]
+                    continue  # leave team=None → excluded from hull/lines
+            # Team assignment in full L*a*b* space — more robust than a*b*-only
+            # when luminance is the discriminative dimension (dark vs bright kits).
+            dists_assign = np.linalg.norm(centres_3d - lab, axis=1)
+            best_tc   = team_clusters[int(np.argmin(dists_assign))]
             p["team"] = team_map[best_tc]
             assigned += 1
 

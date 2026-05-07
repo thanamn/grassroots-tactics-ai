@@ -72,7 +72,7 @@ def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
         for d in tracks.values():
             avg_x = sum(x for x, _ in d["pos"]) / len(d["pos"])
             avg_y = sum(y for _, y in d["pos"]) / len(d["pos"])
-            if d["n"] > 0 and d["gk"] / d["n"] > 0.40:
+            if d["n"] >= 3 and d["gk"] / d["n"] > 0.50:
                 gks.append((avg_x, avg_y))
             else:
                 outfield.append((avg_x, avg_y))
