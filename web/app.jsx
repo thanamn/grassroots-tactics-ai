@@ -60,7 +60,7 @@ const T = {
     sessionType: 'Session type',
     match: '⚽ Match',
     training: '🏃 Training',
-    opponent: 'Match name',
+    matchName: 'Match name',
     notes: 'Notes for AI (optional)',
     startAnalysis: 'Start AI analysis →',
     analysing: 'Analysing your video',
@@ -148,7 +148,7 @@ const T = {
     sessionType: 'ประเภทเซสชั่น',
     match: '⚽ แข่งขัน',
     training: '🏃 ฝึกซ้อม',
-    opponent: 'ชื่อแมทช์',
+    matchName: 'ชื่อแมทช์',
     notes: 'หมายเหตุถึง AI (ไม่จำเป็น)',
     startAnalysis: 'เริ่มวิเคราะห์ →',
     analysing: 'กำลังวิเคราะห์คลิป',
@@ -670,7 +670,7 @@ function Onboarding({ setScreen, lang, preselected }) {
               </div>
               {ctx.session_type === 'match' && (
                 <div>
-                  <label style={{ fontSize: 12, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, display: 'block' }}>{t.opponent}</label>
+                  <label style={{ fontSize: 12, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, display: 'block' }}>{t.matchName}</label>
                   <input className="input" value={ctx.opponent} onChange={(e) => setCtx((c) => ({ ...c, opponent: e.target.value }))} placeholder={lang === 'th' ? 'เช่น vs ทีม A, รอบชิงชนะเลิศ' : 'e.g. vs Hartfield FC, Cup Final'} />
                 </div>
               )}
