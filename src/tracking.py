@@ -78,10 +78,20 @@ class _CentroidTracker:
         self.iou_thresh = iou_thresh
         self.max_lost = max_lost
         self._next_id = 1
-        self._tracks: dict[int, dict] = {}  # id → {box, lost}
+        self._tracks: dict[int, dict] = {}  # id → {box, lost, gk_count, total_count}
 
-    def update(self, boxes: np.ndarray) -> list[tuple[int, np.ndarray]]:
-        """Match detections to existing tracks; return [(track_id, box), ...]."""
+    def update(self, boxes: np.ndarray,
+               classes: np.ndarray | None = None) -> list[tuple[int, np.ndarray, int]]:
+        """Match detections to tracks; return [(track_id, box, dominant_cls), ...].
+
+        ``classes`` is a parallel array of YOLO class IDs (1=GK, 2=player).
+        We accumulate class votes per track across frames so a player who is
+        occasionally mis-classified for one frame keeps its stable label.
+        Returns ``dominant_cls=1`` when >40 % of votes were class-1 (GK).
+        """
+        if classes is None:
+            classes = np.full(len(boxes), 2, dtype=int)
+
         if len(boxes) == 0:
             for t in self._tracks.values():
                 t["lost"] += 1
@@ -89,13 +99,19 @@ class _CentroidTracker:
                             if v["lost"] <= self.max_lost}
             return []
 
+        def _dominant(track: dict) -> int:
+            total = track.get("total_count", 1)
+            gk    = track.get("gk_count", 0)
+            return 1 if total > 0 and gk / total > 0.40 else 2
+
         track_ids = list(self._tracks.keys())
         if not track_ids:
             result = []
-            for box in boxes:
+            for box, cls in zip(boxes, classes):
                 tid = self._next_id; self._next_id += 1
-                self._tracks[tid] = {"box": box, "lost": 0}
-                result.append((tid, box))
+                self._tracks[tid] = {"box": box, "lost": 0,
+                                     "gk_count": int(cls == 1), "total_count": 1}
+                result.append((tid, box, int(cls)))
             return result
 
         # Build cost matrix (1 - IoU)
@@ -113,16 +129,23 @@ class _CentroidTracker:
             if cost[ri, ci] > 1.0 - self.iou_thresh:
                 continue  # poor match → new track
             tid = track_ids[ri]
-            self._tracks[tid] = {"box": boxes[ci], "lost": 0}
-            result.append((tid, boxes[ci]))
+            old = self._tracks[tid]
+            new_cls = int(classes[ci])
+            self._tracks[tid] = {
+                "box": boxes[ci], "lost": 0,
+                "gk_count":    old.get("gk_count", 0) + (1 if new_cls == 1 else 0),
+                "total_count": old.get("total_count", 0) + 1,
+            }
+            result.append((tid, boxes[ci], _dominant(self._tracks[tid])))
             matched_tracks.add(ri); matched_dets.add(ci)
 
         # Unmatched detections → new tracks
-        for ci, box in enumerate(boxes):
+        for ci, (box, cls) in enumerate(zip(boxes, classes)):
             if ci not in matched_dets:
                 tid = self._next_id; self._next_id += 1
-                self._tracks[tid] = {"box": box, "lost": 0}
-                result.append((tid, box))
+                self._tracks[tid] = {"box": box, "lost": 0,
+                                     "gk_count": int(cls == 1), "total_count": 1}
+                result.append((tid, box, int(cls)))
 
         # Unmatched tracks → increment lost counter
         for ri, tid in enumerate(track_ids):
@@ -188,21 +211,25 @@ def run_tracking(video_path: Path, model_name: str | None = None,
 
         # Split detections: players (class 1, 2) vs ball (class 0)
         if model_has_ball and result.boxes is not None and len(result.boxes) > 0:
-            cls  = result.boxes.cls.cpu().numpy().astype(int)
+            det_cls  = result.boxes.cls.cpu().numpy().astype(int)
             xyxy = result.boxes.xyxy.cpu().numpy()
-            player_boxes = xyxy[np.isin(cls, [1, 2])]
-            ball_boxes   = xyxy[cls == 0]
+            player_mask   = np.isin(det_cls, [1, 2])
+            player_boxes  = xyxy[player_mask]
+            player_classes = det_cls[player_mask]   # 1=GK, 2=player
+            ball_boxes    = xyxy[det_cls == 0]
         else:
             player_boxes = (result.boxes.xyxy.cpu().numpy()
                             if result.boxes is not None and len(result.boxes) > 0
                             else np.empty((0, 4)))
+            player_classes = np.full(len(player_boxes), 2, dtype=int)
             ball_boxes = np.empty((0, 4))
 
-        tracks = tracker.update(player_boxes)
+        tracks = tracker.update(player_boxes, player_classes)
         players = []
-        for tid, (x1, y1, x2, y2) in tracks:
+        for tid, (x1, y1, x2, y2), dominant_cls in tracks:
             players.append({
                 "track_id": int(tid),
+                "cls":  int(dominant_cls),   # 1=GK, 2=outfield player
                 "team": None,
                 # Bottom-centre = where the player's feet meet the pitch.
                 # See module docstring for why this beats geometric centroid

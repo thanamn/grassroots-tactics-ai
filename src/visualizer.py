@@ -34,20 +34,21 @@ SMOOTH_W = 7
 
 
 def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
-                    window: int = SMOOTH_W) -> dict[str, list[tuple[float, float]]]:
+                    window: int = SMOOTH_W) -> dict[str, dict]:
     """Return per-team player positions smoothed over the last ``window`` frames.
 
-    For each track_id that appeared in any frame in [frame_idx-window+1,
-    frame_idx], we take the average (x, y) over those appearances. This keeps
-    each player at a stable position even when YOLO misses them for a frame or
-    two, eliminating hull flicker without adding visible lag.
+    Returns a dict keyed by team ("A"/"B"), each value being:
+        {"outfield": [(x, y), ...], "gks": [(x, y), ...]}
 
-    When tracking was run with ``vid_stride > 1`` the caller passes a larger
-    window (typically ``SMOOTH_W * vid_stride``) so the same number of
-    tracked entries is covered despite the gaps between them.
+    GK identification uses the ``cls`` field saved by tracking.py (1 = GK,
+    2 = outfield player). A track_id is treated as GK when >40 % of its
+    detections in the smoothing window were class 1. If the JSON pre-dates
+    the cls field (legacy), all players land in "outfield" and the caller
+    falls back to the old furthest-from-centroid heuristic.
     """
     lo = max(0, frame_idx - window + 1)
-    team_tracks: dict[str, dict[int, list]] = {"A": {}, "B": {}}
+    # track_id → {positions: [(x,y)...], gk_count: int, total: int}
+    team_tracks: dict[str, dict[int, dict]] = {"A": {}, "B": {}}
 
     for fi in range(lo, frame_idx + 1):
         fd = frames_by_idx.get(fi)
@@ -57,43 +58,98 @@ def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
             t = p.get("team")
             if t not in ("A", "B"):
                 continue
-            team_tracks[t].setdefault(p["track_id"], []).append((p["x"], p["y"]))
+            tid = p["track_id"]
+            d = team_tracks[t].setdefault(tid, {"pos": [], "gk": 0, "n": 0})
+            d["pos"].append((p["x"], p["y"]))
+            d["n"] += 1
+            if p.get("cls") == 1:
+                d["gk"] += 1
 
-    result: dict[str, list] = {}
+    result: dict[str, dict] = {}
     for team, tracks in team_tracks.items():
-        pts = []
-        for positions in tracks.values():
-            xs = [pos[0] for pos in positions]
-            ys = [pos[1] for pos in positions]
-            pts.append((sum(xs) / len(xs), sum(ys) / len(ys)))
-        result[team] = pts
+        outfield: list[tuple[float, float]] = []
+        gks: list[tuple[float, float]] = []
+        for d in tracks.values():
+            avg_x = sum(x for x, _ in d["pos"]) / len(d["pos"])
+            avg_y = sum(y for _, y in d["pos"]) / len(d["pos"])
+            if d["n"] > 0 and d["gk"] / d["n"] > 0.40:
+                gks.append((avg_x, avg_y))
+            else:
+                outfield.append((avg_x, avg_y))
+        result[team] = {"outfield": outfield, "gks": gks}
     return result
 
 
-def _draw_team(frame: np.ndarray, points: list[tuple[float, float]], color: tuple[int, int, int]) -> None:
-    if len(points) < 3:
-        return
-    pts = np.asarray(points, dtype=np.float32)
+def _draw_team(frame: np.ndarray,
+               outfield: list[tuple[float, float]],
+               gks: list[tuple[float, float]],
+               color: tuple[int, int, int]) -> None:
+    """Draw tactical overlay for one team.
 
-    # Mirror metrics.py: drop the player furthest from the team centroid
-    # (goalkeeper proxy). Keeps overlay consistent with what the metric numbers show.
-    if len(pts) >= 4:
+    - Light convex hull fill shows the team's occupied zone.
+    - Delaunay triangulation edges connect every pair of nearby outfield
+      players, showing the actual formation shape (not just the outer hull).
+    - GKs (identified via cls=1 from the football model) are drawn with a
+      distinct marker and excluded from the hull / Delaunay so they don't
+      distort the outfield shape metrics.
+    - Falls back to the old "drop furthest player" heuristic when no cls
+      info is available (legacy JSON produced before this fix).
+    """
+    pts = np.asarray(outfield, dtype=np.float32) if outfield else np.empty((0, 2), dtype=np.float32)
+
+    # Legacy fallback: if no GK was identified via cls, drop the player
+    # furthest from the team centroid (the old proxy).
+    if len(gks) == 0 and len(pts) >= 4:
         c = pts.mean(axis=0)
         pts = pts[np.argsort(np.linalg.norm(pts - c, axis=1))[:-1]]
 
-    try:
-        hull = ConvexHull(pts)
-        hull_pts = pts[hull.vertices].astype(np.int32)
-        overlay = frame.copy()
-        cv2.fillPoly(overlay, [hull_pts], color)
-        cv2.addWeighted(overlay, 0.18, frame, 0.82, 0, dst=frame)
-        cv2.polylines(frame, [hull_pts], isClosed=True, color=color, thickness=2)
-    except QhullError:
-        pass
+    h, w = frame.shape[:2]
+    # Max edge length: 30 % of the longer frame dimension.  Connects players
+    # within the same unit (defensive / midfield line) without drawing wild
+    # diagonals across the entire pitch.
+    max_edge_px = max(w, h) * 0.25
 
-    centroid = pts.mean(axis=0).astype(int)
-    cv2.circle(frame, tuple(centroid), 6, color, -1)
-    cv2.circle(frame, tuple(centroid), 6, (255, 255, 255), 1)
+    # Light convex-hull fill — keeps the team-zone feel without cluttering lines
+    if len(pts) >= 3:
+        try:
+            hull = ConvexHull(pts)
+            hull_pts = pts[hull.vertices].astype(np.int32)
+            overlay = frame.copy()
+            cv2.fillPoly(overlay, [hull_pts], color)
+            cv2.addWeighted(overlay, 0.13, frame, 0.87, 0, dst=frame)
+        except QhullError:
+            pass
+
+    # Draw lines between every pair of outfield players within max_edge_px.
+    # Simpler than Delaunay: avoids the problematic long outer-boundary edges
+    # that Delaunay forces between isolated players. O(n²) is fine for n≤11.
+    for i in range(len(pts)):
+        for j in range(i + 1, len(pts)):
+            edge_len = float(np.linalg.norm(pts[i] - pts[j]))
+            if edge_len <= max_edge_px:
+                p1 = (int(pts[i, 0]), int(pts[i, 1]))
+                p2 = (int(pts[j, 0]), int(pts[j, 1]))
+                cv2.line(frame, p1, p2, color, 2, cv2.LINE_AA)
+
+    # Outfield player dots
+    for x, y in pts:
+        cv2.circle(frame, (int(x), int(y)), 5, color, -1)
+        cv2.circle(frame, (int(x), int(y)), 5, (0, 0, 0), 1)
+
+    # GK: larger circle + white cross so it's visually distinct
+    for x, y in gks:
+        ix, iy = int(x), int(y)
+        cv2.circle(frame, (ix, iy), 8, color, -1)
+        cv2.circle(frame, (ix, iy), 8, (255, 255, 255), 2)
+        d = 5
+        cv2.line(frame, (ix - d, iy - d), (ix + d, iy + d), (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.line(frame, (ix + d, iy - d), (ix - d, iy + d), (255, 255, 255), 2, cv2.LINE_AA)
+
+    # Team centroid dot
+    if len(pts) > 0:
+        cx, cy = pts.mean(axis=0).astype(int)
+        cv2.circle(frame, (int(cx), int(cy)), 7, color, -1)
+        cv2.circle(frame, (int(cx), int(cy)), 7, (255, 255, 255), 2)
 
 
 def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> None:
@@ -128,13 +184,8 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
             break
         smoothed = _smoothed_teams(frames_by_idx, frame_idx, window=window)
         for team, color in TEAM_COLORS.items():
-            _draw_team(frame, smoothed.get(team, []), color)
-        # Draw a dot at each player's foot position so excluded/edge players
-        # are visible — makes the tracking transparent for the user study.
-        for team, color in TEAM_COLORS.items():
-            for x, y in smoothed.get(team, []):
-                cv2.circle(frame, (int(x), int(y)), 4, color, -1)
-                cv2.circle(frame, (int(x), int(y)), 4, (0, 0, 0), 1)
+            data = smoothed.get(team, {"outfield": [], "gks": []})
+            _draw_team(frame, data["outfield"], data["gks"], color)
         writer.write(frame)
         frame_idx += 1
 
