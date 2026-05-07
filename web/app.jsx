@@ -841,6 +841,14 @@ function Analysis({ setScreen, lang, jobId }) {
             <div className="card" style={{ overflow: 'hidden' }}>
               <video ref={videoRef} src={`/api/jobs/${jobId}/overlay`} controls
                      style={{ width: '100%', display: 'block', background: '#000', aspectRatio: '16/9' }} />
+              <div style={{ display: 'flex', gap: 16, padding: '10px 14px', borderTop: `1px solid ${C.border}` }}>
+                {[['A', C.teamA, labelA], ['B', C.teamB, labelB]].map(([ab, color, label]) => (
+                  <div key={ab} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.gray }}>
+                    <span style={{ width: 24, height: 3, borderRadius: 2, background: color, display: 'inline-block' }} />
+                    {label}
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Ask Your AI Coach — chat grounded in this clip's metrics */}
@@ -869,6 +877,18 @@ function Analysis({ setScreen, lang, jobId }) {
           {/* Right rail */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 80 }}>
 
+            <TacticalSummary
+              t={t}
+              explanation={explanation}
+              retrying={retrying}
+              retryError={retryError}
+              onRetryExplanation={onRetryExplanation}
+              stretchCount={stretchCount}
+              compressCount={compressCount}
+              eventCount={events.length}
+              gap={gap}
+            />
+
             {/* Team picker */}
             <div className="card" style={{ padding: '14px 18px' }}>
               <div style={{ fontSize: 11, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>
@@ -895,18 +915,6 @@ function Analysis({ setScreen, lang, jobId }) {
                 })}
               </div>
             </div>
-
-            <TacticalSummary
-              t={t}
-              explanation={explanation}
-              retrying={retrying}
-              retryError={retryError}
-              onRetryExplanation={onRetryExplanation}
-              stretchCount={stretchCount}
-              compressCount={compressCount}
-              eventCount={events.length}
-              gap={gap}
-            />
 
             {/* Snapshot stats */}
             <div className="card" style={{ padding: 20 }}>
@@ -1039,11 +1047,15 @@ function TacticalSummary({
                        body={explanation.coaching_cue} accent={C.green} />
           <SummaryItem icon="📊" label={t.summaryStats}
                        body={stats} accent={C.grayLight} />
-          <div style={{ marginTop: 4, paddingTop: 8,
-                        borderTop: `1px solid ${C.border}`,
-                        fontSize: 11, color: C.gray, fontFamily: 'monospace' }}>
-            model: {explanation.model || '?'} · prompt v{explanation.prompt_version || '?'}
-          </div>
+          <details style={{ marginTop: 4, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+            <summary style={{ fontSize: 11, color: C.gray, cursor: 'pointer', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ opacity: 0.5 }}>ⓘ</span>
+              <span style={{ fontFamily: 'monospace' }}>model info</span>
+            </summary>
+            <div style={{ marginTop: 6, fontSize: 11, color: C.gray, fontFamily: 'monospace' }}>
+              {explanation.model || '?'} · prompt v{explanation.prompt_version || '?'}
+            </div>
+          </details>
         </div>
       ) : (
         <div style={{ color: C.yellow, fontSize: 13, lineHeight: 1.6 }}>
