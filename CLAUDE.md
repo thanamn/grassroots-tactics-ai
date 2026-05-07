@@ -39,10 +39,10 @@ spacing/compactness.** The paper presents the others as future work.
    clips) saves time, take it. The user has only ~5 weeks and is working
    essentially solo (teammates are on exam burnout).
 
-4. **Use Gemini, not Claude/OpenAI.** The student is on Gemini free tier with
-   `google-genai` SDK (the modern one, not deprecated `google-generativeai`).
-   Default model: `gemini-2.5-flash`. JSON output is enforced via
-   `response_schema`, not via prompt-side instructions.
+4. **LLM backend is DeepSeek (`deepseek-reasoner`) via OpenAI-compatible endpoint.**
+   Uses the `openai` SDK pointed at DeepSeek's API. JSON output via
+   `response_format={"type": "json_object"}`. API key in `.env` as
+   `DEEPSEEK_API_KEY`. Do not switch to Gemini or Claude without being asked.
 
 5. **The explanation is bilingual (en/th).** Thai users are the realistic target
    for grassroots fieldwork. Both prompt templates exist in
@@ -66,7 +66,9 @@ Pipeline modules:
 
 - `src/tracking.py` — football-specific YOLOv8 (`football_players.pt`) +
   custom IoU centroid tracker (no ByteTrack DLL). Uses **bottom-centre** of
-  bbox as player position (foot contact point). Ball detected as class 0,
+  bbox as player position (foot contact point). Saves `cls` field per player
+  (1=GK, 2=outfield) by accumulating per-track class votes across frames;
+  `dominant_cls=1` when >40% of votes were class 1. Ball detected as class 0,
   interpolated across short gaps (≤30 frames). Team field left null here.
 - `scripts/assign_teams.py` — two-pass jersey colour clustering. Pass 1:
   crop shirt zone (15–50% of bbox height), mask grass pixels in HSV, compute
@@ -80,13 +82,25 @@ Pipeline modules:
 - `src/ball_metrics.py` — possession % and pass stats from ball + player data.
   Key constants: `POSSESSION_THRESHOLD_PX=150`, `MIN_SPELL_DURATION_S=0.2`
   (filters tracker ID-switch noise), `MAX_PASS_GAP_S=3.0`.
-- `src/visualizer.py` — convex hull fill + outline per team, centroid dot,
-  and **per-player foot-position dots** (4 px circles). GK-proxy player is
-  excluded from hull but dot is still drawn.
+- `src/visualizer.py` — per-team overlay with: light convex hull fill (13%
+  opacity), **pairwise formation lines** between outfield players within 25% of
+  max frame dimension, centroid dot. GKs identified via `cls=1` votes are drawn
+  with a distinct circle + white cross marker and excluded from hull/lines.
+  Legacy fallback (no cls field): drops furthest-from-centroid player as GK proxy.
+  Temporal smoothing window (SMOOTH_W × stride frames) prevents hull flicker
+  when a player is briefly occluded.
 - `src/explainer.py` — DeepSeek API (`deepseek-reasoner`) via OpenAI-compatible
   endpoint. Returns `headline`, `implication`, `coaching_cue` as JSON.
 - `prompts/tactical_explainer.py` — versioned prompt templates with explicit
   banned-jargon list (xG, PPDA, half-spaces, Voronoi, etc.).
+- `scripts/find_active_play.py` — standalone motion scorer. Frame-difference
+  (`cv2.absdiff`) at stride=4 on 320×180 frames; sliding 20-second window
+  scored as `mean − 0.4·std + 0.3·weakest_chunk`. Returns best start time.
+- `scripts/download_active_clips.py` — downloads 90-second sections from UCL
+  matches via yt-dlp, runs motion analysis, trims to best 20-second active-play
+  window with ffmpeg. Output: `C:\Users\TSURUGI\Desktop\football_clips\`.
+  5 clips already downloaded (liverpool_vs_psg, benfica_vs_realmadrid,
+  psg_vs_newcastle, psg_vs_arsenal, psg_vs_intermilan).
 - `app/streamlit_app.py` — sidebar clip picker, language toggle, "show AI
   explanation" toggle (for the user-study control condition).
 - `study/` — SUS questionnaire (10 standard items + 5 custom items on trust
@@ -104,35 +118,29 @@ Pipeline modules:
 
 ## Data plan
 
-- 1–2 **pro tactical-view clips** (EPL/World Cup, ~15–20 s) for technical
-  validation — clean colour separation, easy to track, gives clean ground truth
-  for the metrics. Justified in paper as "technical validation against
-  high-quality footage".
+- **5 UCL tactical-view clips** (20 s each, active play only) — downloaded to
+  `C:\Users\TSURUGI\Desktop\football_clips\` via `scripts/download_active_clips.py`.
+  Auto-trimmed by motion analysis to avoid dead balls / set pieces. Use for
+  technical validation and demo.
 - 1 **grassroots clip** (YouTube amateur/Sunday-league/youth-football) for the
   user study. Lower quality but matches the target deployment context. This
   is the primary "we built it for grassroots" evidence in the paper.
 
 ## Python environment
 
-Project uses the **`dsde` conda env** managed by miniforge3/mamba (Python 3.11).
+Project uses a `.venv` virtualenv (Python 3.11) in the project root.
 Never use bare `python` / `python3` — on Windows those resolve to the Microsoft
-Store stub. Always invoke via the full path:
+Store stub. Always invoke via the venv path:
 
 ```
-C:\Users\Ittyy\.local\share\mamba\envs\dsde\python.exe
-C:\Users\Ittyy\.local\share\mamba\envs\dsde\Scripts\uvicorn.exe
+.venv\Scripts\python.exe
+.venv\Scripts\uvicorn.exe
 ```
 
 PowerShell example (run backend from project root):
 
 ```powershell
-C:\Users\Ittyy\.local\share\mamba\envs\dsde\Scripts\uvicorn.exe backend.main:app --reload --port 8000
-```
-
-Frontend (Vite/React) runs separately on port 5173:
-
-```powershell
-cd web && npm run dev
+.venv\Scripts\uvicorn.exe backend.main:app --reload --port 8000
 ```
 
 ## Conventions and preferences

@@ -62,7 +62,9 @@ grassroots-tactics-ai/
 │   ├── index.html          # React SPA entry point (React loaded from CDN)
 │   └── app.jsx             # upload form, live job-status polling, results view
 ├── scripts/
-│   └── assign_teams.py     # two-pass jersey-colour clustering (DBSCAN → k-means)
+│   ├── assign_teams.py         # two-pass jersey-colour clustering (DBSCAN → k-means)
+│   ├── find_active_play.py     # motion scorer → best 20-second active-play window
+│   └── download_active_clips.py  # download UCL clips + auto-trim to active play
 ├── app/
 │   └── streamlit_app.py    # fallback UI for cached clips (user-study control)
 ├── prompts/
