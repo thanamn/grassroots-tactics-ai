@@ -60,7 +60,7 @@ const T = {
     sessionType: 'Session type',
     match: '⚽ Match',
     training: '🏃 Training',
-    opponent: 'Opponent',
+    opponent: 'Match name',
     notes: 'Notes for AI (optional)',
     startAnalysis: 'Start AI analysis →',
     analysing: 'Analysing your video',
@@ -148,7 +148,7 @@ const T = {
     sessionType: 'ประเภทเซสชั่น',
     match: '⚽ แข่งขัน',
     training: '🏃 ฝึกซ้อม',
-    opponent: 'คู่แข่ง',
+    opponent: 'ชื่อแมทช์',
     notes: 'หมายเหตุถึง AI (ไม่จำเป็น)',
     startAnalysis: 'เริ่มวิเคราะห์ →',
     analysing: 'กำลังวิเคราะห์คลิป',
@@ -516,7 +516,7 @@ function RecentRow({ job, delay, t, onOpen, onDelete }) {
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {job.opponent ? `vs ${job.opponent}` : job.filename}
+          {job.opponent || job.filename}
         </div>
         <div style={{ display: 'flex', gap: 12, fontSize: 12, color: C.gray, flexWrap: 'wrap' }}>
           <span>{new Date(job.created_at).toLocaleString()}</span>
@@ -671,7 +671,7 @@ function Onboarding({ setScreen, lang, preselected }) {
               {ctx.session_type === 'match' && (
                 <div>
                   <label style={{ fontSize: 12, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, display: 'block' }}>{t.opponent}</label>
-                  <input className="input" value={ctx.opponent} onChange={(e) => setCtx((c) => ({ ...c, opponent: e.target.value }))} placeholder="Hartfield FC" />
+                  <input className="input" value={ctx.opponent} onChange={(e) => setCtx((c) => ({ ...c, opponent: e.target.value }))} placeholder={lang === 'th' ? 'เช่น vs ทีม A, รอบชิงชนะเลิศ' : 'e.g. vs Hartfield FC, Cup Final'} />
                 </div>
               )}
               <div>
@@ -875,7 +875,7 @@ function Analysis({ setScreen, lang, jobId }) {
           <button onClick={() => setScreen({ name: 'dashboard' })} style={{ background: 'none', color: C.gray, fontSize: 13 }}>{t.backDash}</button>
           <span>·</span>
           <span style={{ color: C.white }}>
-            {job.opponent ? `vs ${job.opponent}` : job.filename}
+            {job.opponent || job.filename}
           </span>
           <span style={{ color: C.gray }}>· {(job.duration_s || 0).toFixed(1)}s · {(job.fps || 0).toFixed(0)} fps</span>
         </div>
