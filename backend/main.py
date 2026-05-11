@@ -31,7 +31,7 @@ from pathlib import Path
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -40,7 +40,21 @@ sys.path.insert(0, str(ROOT))
 from backend.jobs import (
     create_job, delete_job, list_jobs, load_job, save_job,
 )
-from src.config import CACHE_DIR, CLIPS_DIR
+from backend.demo_store import (
+    demo_overlay_path,
+    list_demo_clips,
+    load_demo_clip,
+    load_demo_result,
+)
+from backend.eval_store import (
+    list_benchmark_runs,
+    list_manifests,
+    load_annotations,
+    load_manifest,
+    save_annotations,
+    seed_annotations_from_run,
+)
+from src.config import CACHE_DIR, CLIPS_DIR, EVAL_DIR
 
 WEB_DIR = ROOT / "web"
 MAX_UPLOAD_MB = 500   # honest cap given CPU pipeline; ~10–15 min HD
@@ -261,11 +275,114 @@ def remove_job(job_id: str):
     return {"ok": True}
 
 
+# ── Demo clips ───────────────────────────────────────────────────────────────
+
+@app.get("/api/demo/clips")
+def demo_clips():
+    return list_demo_clips()
+
+
+@app.get("/api/demo/clips/{clip_id}")
+def demo_clip(clip_id: str):
+    clip = load_demo_clip(clip_id)
+    if not clip:
+        raise HTTPException(404, "Demo clip not found")
+    return clip
+
+
+@app.get("/api/demo/clips/{clip_id}/result")
+def demo_result(clip_id: str, lang: str = "en"):
+    clip = load_demo_clip(clip_id)
+    if not clip:
+        raise HTTPException(404, "Demo clip not found")
+    if lang not in ("en", "th"):
+        raise HTTPException(400, "lang must be 'en' or 'th'")
+    return load_demo_result(clip_id, lang=lang)
+
+
+@app.get("/api/demo/clips/{clip_id}/overlay")
+def demo_overlay(clip_id: str):
+    clip = load_demo_clip(clip_id)
+    if not clip:
+        raise HTTPException(404, "Demo clip not found")
+    path = demo_overlay_path(clip_id)
+    if not path.exists():
+        raise HTTPException(404, "Demo overlay missing")
+    return FileResponse(path, media_type="video/mp4")
+
+
+# ── Evaluation tooling ──────────────────────────────────────────────────────
+
+@app.get("/annotator")
+def annotator_root():
+    idx = WEB_DIR / "annotator.html"
+    if not idx.exists():
+        raise HTTPException(503, "Annotator not built. Expected web/annotator.html")
+    return FileResponse(idx)
+
+
+@app.get("/api/eval/manifests")
+def eval_manifests():
+    return list_manifests()
+
+
+@app.get("/api/eval/runs")
+def eval_runs():
+    return list_benchmark_runs()
+
+
+@app.get("/api/eval/manifests/{manifest_id}")
+def eval_manifest(manifest_id: str):
+    manifest = load_manifest(manifest_id)
+    if not manifest:
+        raise HTTPException(404, "Manifest not found")
+    return manifest
+
+
+@app.get("/api/eval/annotations/{manifest_id}")
+def eval_annotations(manifest_id: str):
+    manifest = load_manifest(manifest_id)
+    if not manifest:
+        raise HTTPException(404, "Manifest not found")
+    return load_annotations(manifest_id)
+
+
+@app.post("/api/eval/annotations/{manifest_id}")
+def save_eval_annotations(manifest_id: str, payload: dict = Body(...)):
+    manifest = load_manifest(manifest_id)
+    if not manifest:
+        raise HTTPException(404, "Manifest not found")
+    return save_annotations(manifest_id, payload)
+
+
+@app.post("/api/eval/annotations/{manifest_id}/seed")
+def seed_eval_annotations(manifest_id: str, payload: dict = Body(...)):
+    manifest = load_manifest(manifest_id)
+    if not manifest:
+        raise HTTPException(404, "Manifest not found")
+    run_id = (payload.get("run_id") or "").strip()
+    preset = (payload.get("preset") or "").strip()
+    if not run_id or not preset:
+        raise HTTPException(400, "run_id and preset are required")
+    try:
+        return seed_annotations_from_run(
+            manifest_id,
+            run_id,
+            preset,
+            overwrite=bool(payload.get("overwrite")),
+            include_other=bool(payload.get("include_other")),
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+
+
 # ── Frontend ───────────────────────────────────────────────────────────────
 
 # Mount /web/ as static files. index.html is served from / for cleanliness.
 if WEB_DIR.exists():
     app.mount("/web", StaticFiles(directory=WEB_DIR), name="web")
+if EVAL_DIR.exists():
+    app.mount("/eval-media", StaticFiles(directory=EVAL_DIR), name="eval-media")
 
 
 @app.get("/")
@@ -274,3 +391,8 @@ def root():
     if not idx.exists():
         raise HTTPException(503, "Frontend not built. Expected web/index.html")
     return FileResponse(idx)
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return Response(status_code=204)

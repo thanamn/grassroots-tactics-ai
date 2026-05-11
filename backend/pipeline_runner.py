@@ -48,10 +48,9 @@ STAGES = [
 
 # ── Auto-tune for long videos ──────────────────────────────────────────────
 # YOLO inference scales with frame count. A 1.5h match at 25 fps is 135k
-# frames — even on the dev RTX 4070 that's ~20 min just for tracking with
-# the x-large model. We auto-pick a stride and a smaller model so long
-# clips actually finish in a session. Short clips keep the high-quality
-# defaults.
+# frames, so long clips still need frame skipping. Keep the football-specific
+# model, though: the generic nano detector is fast but misses far too many
+# broadcast players for stable team shapes.
 #
 # (duration_s_threshold, vid_stride, model_name) — first row whose
 # threshold exceeds the actual duration wins. ``None`` model means "use
@@ -59,9 +58,9 @@ STAGES = [
 AUTO_TUNE_TABLE = (
     (60,    1, None),           # < 1 min: full quality
     (180,   2, None),           # 1–3 min: light skip, same model
-    (600,   3, "yolo11n.pt"),   # 3–10 min: nano model + stride 3
-    (1800,  5, "yolo11n.pt"),   # 10–30 min: aggressive skip
-    (float("inf"), 8, "yolo11n.pt"),  # 30+ min: maximum throughput
+    (600,   3, None),           # 3–10 min: stride 3, same football model
+    (1800,  5, None),           # 10–30 min: aggressive skip, same model
+    (float("inf"), 8, None),    # 30+ min: maximum throughput, same model
 )
 
 

@@ -22,12 +22,13 @@ literature (Memmert et al. 2017, Low et al. 2020): hull area = how much
 pitch a team occupies, centroid distance = how stretched the game is,
 spread_std = how compact the team is around its core.
 
-Goalkeepers
------------
-Excluding the goalkeeper from the hull dramatically improves the metric
-because GK position is structurally far from the outfield block. We pick
-the player furthest from their team centroid as a proxy GK if exclude_gk
-is on. For broadcast clips that often crop out the GK, this is harmless.
+Shape eligibility
+-----------------
+Tracking JSON can include people who should not define team shape: goalkeepers,
+sideline staff/subs, referees, or colour outliers. Team assignment marks
+``include_in_shape`` for the on-field outfield players; metrics ignore everyone
+else. Legacy JSON without that flag still excludes explicit ``cls=1`` GKs and
+falls back to the old furthest-from-centroid goalkeeper proxy.
 """
 from __future__ import annotations
 
@@ -43,10 +44,51 @@ from scipy.spatial import ConvexHull, QhullError
 
 from src.config import CACHE_DIR, TRACKING_DIR
 
+MAX_HULL_PLAYERS_PER_TEAM = 10
+
 
 # --- helpers -----------------------------------------------------------
 
-def _team_metrics(points: Sequence[tuple[float, float]], exclude_gk: bool = True) -> dict | None:
+def _select_hull_points(pts: np.ndarray,
+                        max_points: int = MAX_HULL_PLAYERS_PER_TEAM) -> np.ndarray:
+    if len(pts) <= max_points:
+        return pts
+
+    pts = pts.astype(float).copy()
+    while len(pts) > max_points:
+        removed_idx: int | None = None
+        if len(pts) >= 4:
+            try:
+                hull_indices = set(int(i) for i in ConvexHull(pts).vertices)
+                interior = [i for i in range(len(pts)) if i not in hull_indices]
+                if interior:
+                    centre = np.median(pts, axis=0)
+                    removed_idx = min(
+                        interior,
+                        key=lambda i: float(np.linalg.norm(pts[i] - centre)),
+                    )
+            except QhullError:
+                pass
+
+        if removed_idx is None:
+            best_pair = None
+            best_dist = float("inf")
+            for i in range(len(pts)):
+                for j in range(i + 1, len(pts)):
+                    d = float(np.linalg.norm(pts[i] - pts[j]))
+                    if d < best_dist:
+                        best_dist = d
+                        best_pair = (i, j)
+            if best_pair is None:
+                break
+            centre = np.median(pts, axis=0)
+            i, j = best_pair
+            removed_idx = i if np.linalg.norm(pts[i] - centre) < np.linalg.norm(pts[j] - centre) else j
+
+        pts = np.delete(pts, removed_idx, axis=0)
+    return pts
+
+def _team_metrics(points: Sequence[tuple[float, float]], exclude_gk: bool = False) -> dict | None:
     """Return hull_area, centroid, spread_std for one team in one frame."""
     if len(points) < 3:
         return None
@@ -57,6 +99,8 @@ def _team_metrics(points: Sequence[tuple[float, float]], exclude_gk: bool = True
         dists = np.linalg.norm(pts - centroid, axis=1)
         keep_idx = np.argsort(dists)[:-1]    # drop furthest player
         pts = pts[keep_idx]
+
+    pts = _select_hull_points(pts)
 
     centroid = pts.mean(axis=0)
     dists = np.linalg.norm(pts - centroid, axis=1)
@@ -74,6 +118,14 @@ def _team_metrics(points: Sequence[tuple[float, float]], exclude_gk: bool = True
         "spread_std": spread_std,
         "n_players": int(len(pts)),
     }
+
+
+def _include_in_shape(player: dict) -> bool:
+    if "include_in_shape" in player:
+        return bool(player.get("include_in_shape"))
+    if player.get("cls") == 1:
+        return False
+    return player.get("team") in ("A", "B")
 
 
 def _summarise(values: list[float]) -> dict:
@@ -145,13 +197,15 @@ def compute_metrics(tracking: dict) -> dict:
     per_frame = []
     for frame in tracking["frames"]:
         teams: dict[str, list] = defaultdict(list)
+        legacy_shape_flag_missing = True
         for p in frame["players"]:
-            if p.get("team") in ("A", "B"):
+            legacy_shape_flag_missing = legacy_shape_flag_missing and "include_in_shape" not in p
+            if p.get("team") in ("A", "B") and _include_in_shape(p):
                 teams[p["team"]].append((p["x"], p["y"]))
 
         entry = {"t": frame["t"], "frame": frame["frame"]}
-        ma = _team_metrics(teams.get("A", []))
-        mb = _team_metrics(teams.get("B", []))
+        ma = _team_metrics(teams.get("A", []), exclude_gk=legacy_shape_flag_missing)
+        mb = _team_metrics(teams.get("B", []), exclude_gk=legacy_shape_flag_missing)
         if ma:
             entry["team_A"] = ma
         if mb:

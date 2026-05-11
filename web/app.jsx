@@ -124,6 +124,23 @@ const T = {
     moreCompact: 'More compact',
     balanced: 'Balanced',
     spacingNote: 'Higher area = more spread out. Compare between teams, not across clips.',
+    demoMode: 'Demo mode',
+    demoLead: 'Open polished precomputed clips instantly — no upload or waiting required.',
+    demoSection: 'Instant demo clips',
+    demoSectionSub: 'These three clips are already processed with the refined annotated-base overlay.',
+    demoOpen: 'Open demo clip',
+    demoReady: 'Ready now',
+    demoBadge: 'Precomputed demo',
+    demoTry: 'Try demo mode',
+    demoFlow: 'Demo walkthrough',
+    demoPickTitle: 'Choose a demo clip',
+    demoPickSub: 'Follow the normal product flow with a polished precomputed example instead of waiting for live processing.',
+    demoSelected: 'Selected demo clip',
+    demoNoUpload: 'No real upload is needed. We will simulate the same product journey using a precomputed analysis package.',
+    demoContinue: 'Use this demo clip →',
+    demoBackToUpload: 'Use my own video instead',
+    demoProcessing: 'Preparing demo analysis',
+    demoDone: 'Demo ready!',
   },
   th: {
     eyebrow: 'AI วิเคราะห์การยืนตำแหน่งของทีม',
@@ -212,6 +229,23 @@ const T = {
     moreCompact: 'บีบกว่า',
     balanced: 'สมดุล',
     spacingNote: 'พื้นที่มากกว่า = กระจายตัวมากกว่า เทียบระหว่างสองทีมในคลิปเดียวกัน',
+    demoMode: 'โหมดเดโม',
+    demoLead: 'เปิดคลิปตัวอย่างที่ประมวลผลเสร็จแล้วได้ทันที โดยไม่ต้องอัปโหลดหรือรอ',
+    demoSection: 'คลิปเดโมพร้อมดูทันที',
+    demoSectionSub: 'ทั้ง 3 คลิปนี้ผ่านการประมวลผลและใช้ overlay แบบ refined annotated-base เรียบร้อยแล้ว',
+    demoOpen: 'เปิดคลิปเดโม',
+    demoReady: 'พร้อมดู',
+    demoBadge: 'เดโมสำเร็จรูป',
+    demoTry: 'ลองโหมดเดโม',
+    demoFlow: 'เส้นทางเดโม',
+    demoPickTitle: 'เลือกคลิปเดโม',
+    demoPickSub: 'ลองตาม flow จริงของระบบได้เลย โดยใช้ตัวอย่างที่ประมวลผลเสร็จแล้วแทนการรอ pipeline จริง',
+    demoSelected: 'คลิปเดโมที่เลือก',
+    demoNoUpload: 'ไม่ต้องอัปโหลดจริง ระบบจะจำลองเส้นทางการใช้งานเดียวกันด้วยผลวิเคราะห์ที่เตรียมไว้แล้ว',
+    demoContinue: 'ใช้คลิปเดโมนี้ →',
+    demoBackToUpload: 'ใช้วิดีโอของฉันเองแทน',
+    demoProcessing: 'กำลังเตรียมเดโม',
+    demoDone: 'เดโมพร้อมแล้ว!',
   },
 };
 
@@ -322,12 +356,35 @@ async function apiListJobs() {
   const r = await fetch('/api/jobs');
   return r.ok ? r.json() : [];
 }
+async function apiListDemos() {
+  const r = await fetch('/api/demo/clips');
+  return r.ok ? r.json() : [];
+}
+function isDemoJobId(jobId) {
+  return typeof jobId === 'string' && jobId.startsWith('demo:');
+}
+function demoClipId(jobId) {
+  return isDemoJobId(jobId) ? jobId.slice(5) : jobId;
+}
+function overlayUrlForJob(jobId) {
+  return isDemoJobId(jobId)
+    ? `/api/demo/clips/${demoClipId(jobId)}/overlay`
+    : `/api/jobs/${jobId}/overlay`;
+}
 async function apiGetJob(jobId) {
-  const r = await fetch(`/api/jobs/${jobId}`);
+  const r = await fetch(
+    isDemoJobId(jobId)
+      ? `/api/demo/clips/${demoClipId(jobId)}`
+      : `/api/jobs/${jobId}`
+  );
   return r.ok ? r.json() : null;
 }
 async function apiGetResult(jobId, lang) {
-  const r = await fetch(`/api/jobs/${jobId}/result?lang=${lang}`);
+  const r = await fetch(
+    isDemoJobId(jobId)
+      ? `/api/demo/clips/${demoClipId(jobId)}/result?lang=${lang}`
+      : `/api/jobs/${jobId}/result?lang=${lang}`
+  );
   return r.ok ? r.json() : null;
 }
 async function apiUpload(file, ctx) {
@@ -367,12 +424,15 @@ function Dashboard({ setScreen, lang }) {
   const t = T[lang];
   const [dragOver, setDragOver] = useState(false);
   const [jobs, setJobs] = useState([]);
+  const [demos, setDemos] = useState([]);
   const [loading, setLoading] = useState(true);
   const fileRef = useRef(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    setJobs(await apiListJobs());
+    const [nextJobs, nextDemos] = await Promise.all([apiListJobs(), apiListDemos()]);
+    setJobs(nextJobs);
+    setDemos(nextDemos);
     setLoading(false);
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
@@ -447,10 +507,21 @@ function Dashboard({ setScreen, lang }) {
               {dragOver ? t.dropDrag : t.drop}
             </div>
             <div style={{ fontSize: 13, color: C.gray, marginBottom: 28, lineHeight: 1.5 }}>{t.dropHint}</div>
-            <button className="btn-primary" style={{ fontSize: 15, padding: '12px 32px' }}
-                    onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}>
-              {t.browse}
-            </button>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button className="btn-primary" style={{ fontSize: 15, padding: '12px 32px' }}
+                      onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}>
+                {t.browse}
+              </button>
+              {demos.length > 0 && (
+                <button className="btn-secondary" style={{ padding: '12px 22px', fontSize: 14 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setScreen({ name: 'onboarding', demoMode: true });
+                        }}>
+                  {t.demoTry}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -467,6 +538,27 @@ function Dashboard({ setScreen, lang }) {
             accent={C.white}
           />
         </div>
+
+        {demos.length > 0 && (
+          <div id="demo-section" style={{ marginBottom: 32 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, letterSpacing: '0.02em' }}>{t.demoSection}</h2>
+              <div style={{ flex: 1, height: 1, background: C.border }} />
+            </div>
+            <div style={{ marginBottom: 14, fontSize: 13, color: C.gray, lineHeight: 1.6 }}>{t.demoSectionSub}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+              {demos.map((demo) => (
+                <DemoCard
+                  key={demo.job_id}
+                  demo={demo}
+                  lang={lang}
+                  t={t}
+                  onOpen={() => setScreen({ name: 'onboarding', demoMode: true, demoClipId: demo.demo_id })}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Recent */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
@@ -495,6 +587,71 @@ function Dashboard({ setScreen, lang }) {
         )}
       </div>
     </div>
+  );
+}
+
+function DemoCard({ demo, lang, t, onOpen }) {
+  const summary = demo.summary || {};
+  const teamA = summary.team_A?.hull_area?.mean || 0;
+  const teamB = summary.team_B?.hull_area?.mean || 0;
+  const gap = summary.centroid_distance?.mean || 0;
+  return (
+    <button
+      className="card slide-up"
+      onClick={onOpen}
+      style={{ padding: 0, overflow: 'hidden', textAlign: 'left', cursor: 'pointer', background: C.card }}
+    >
+      <div style={{ position: 'relative', aspectRatio: '16 / 9', background: '#08121c' }}>
+        {demo.thumbnail_url ? (
+          <img
+            src={demo.thumbnail_url}
+            alt={demo.title}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        ) : null}
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: 'linear-gradient(180deg, rgba(13,27,42,0.08) 0%, rgba(13,27,42,0.75) 100%)',
+        }} />
+        <div style={{
+          position: 'absolute', top: 12, left: 12,
+          fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+          textTransform: 'uppercase', color: C.bg, background: C.green,
+          padding: '5px 10px', borderRadius: 999,
+        }}>
+          {t.demoBadge}
+        </div>
+        <div style={{ position: 'absolute', right: 12, bottom: 12, display: 'flex', gap: 8 }}>
+          <span style={{ fontSize: 11, color: C.white, background: 'rgba(13,27,42,0.8)', padding: '4px 8px', borderRadius: 999 }}>
+            {(demo.duration_s || 0).toFixed(1)}s
+          </span>
+          <span style={{ fontSize: 11, color: C.yellow, background: 'rgba(13,27,42,0.8)', padding: '4px 8px', borderRadius: 999 }}>
+            {demo.events_count || 0} events
+          </span>
+        </div>
+      </div>
+      <div style={{ padding: 16 }}>
+        <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 20, fontWeight: 700, color: C.white, marginBottom: 6 }}>
+          {demo.title || demo.opponent || demo.filename}
+        </div>
+        <div style={{ fontSize: 13, color: C.gray, lineHeight: 1.6, marginBottom: 14 }}>
+          {lang === 'th' ? demo.subtitle_th : demo.subtitle_en}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
+          <MiniStat label={t.teamALabel} value={`${(teamA / 1000).toFixed(0)}k`} color={C.teamA} />
+          <MiniStat label={t.teamBLabel} value={`${(teamB / 1000).toFixed(0)}k`} color={C.teamB} />
+          <MiniStat label={t.gap} value={`${gap.toFixed(0)}px`} color={C.green} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <span style={{ fontSize: 12, color: C.green, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {t.demoReady}
+          </span>
+          <span className="btn-primary" style={{ padding: '10px 14px', fontSize: 13 }}>
+            {t.demoOpen}
+          </span>
+        </div>
+      </div>
+    </button>
   );
 }
 
@@ -537,7 +694,7 @@ function RecentRow({ job, delay, t, onOpen, onDelete }) {
 }
 
 // ── Onboarding (upload + tag + processing + done) ──────────────────────────
-function Onboarding({ setScreen, lang, preselected }) {
+function Onboarding({ setScreen, lang, preselected, demoMode = false, demoClipId = null }) {
   const t = T[lang];
   const [step, setStep] = useState(preselected ? 2 : 1);
   const [file, setFile] = useState(preselected || null);
@@ -547,9 +704,32 @@ function Onboarding({ setScreen, lang, preselected }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [jobId, setJobId] = useState(null);
+  const [demoClips, setDemoClips] = useState([]);
+  const [selectedDemo, setSelectedDemo] = useState(null);
 
   const fileRef = useRef(null);
   const onPickFile = (f) => { if (f) { setFile(f); setStep(2); } };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!demoMode) return;
+    setStep(1);
+    setFile(null);
+    setJobId(null);
+    setUploading(false);
+    setUploadPct(0);
+    setError(null);
+    (async () => {
+      const clips = await apiListDemos();
+      if (cancelled) return;
+      setDemoClips(clips);
+      if (demoClipId) {
+        const found = clips.find((clip) => clip.demo_id === demoClipId);
+        if (found) setSelectedDemo(found);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [demoMode, demoClipId]);
 
   // Upload via XHR so we can show progress %.
   const startUpload = () => {
@@ -578,6 +758,17 @@ function Onboarding({ setScreen, lang, preselected }) {
     };
     xhr.onerror = () => { setUploading(false); setError('Network error'); };
     xhr.send(fd);
+  };
+
+  const startDemoFlow = () => {
+    if (!selectedDemo) return;
+    setCtx((c) => ({
+      ...c,
+      session_type: 'match',
+      opponent: c.opponent || selectedDemo.title || selectedDemo.opponent || 'Demo Clip',
+    }));
+    setJobId(selectedDemo.job_id);
+    setStep(3);
   };
 
   const stepLabels = ['Upload', 'Tag', 'Analysing', 'Done'];
@@ -617,7 +808,7 @@ function Onboarding({ setScreen, lang, preselected }) {
           </div>
         )}
 
-        {step === 1 && (
+        {step === 1 && !demoMode && (
           <div className="slide-up card" style={{ padding: 32 }}>
             <h2 style={{ fontSize: 26, fontWeight: 700, marginBottom: 6 }}>{t.onbUpload}</h2>
             <p style={{ color: C.gray, fontSize: 14, marginBottom: 28, lineHeight: 1.5 }}>{t.onbUploadSub}</p>
@@ -644,6 +835,85 @@ function Onboarding({ setScreen, lang, preselected }) {
           </div>
         )}
 
+        {step === 1 && demoMode && (
+          <div className="slide-up card" style={{ padding: 32 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <Pulse />
+              <span style={{ fontSize: 12, color: C.green, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                {t.demoFlow}
+              </span>
+            </div>
+            <h2 style={{ fontSize: 26, fontWeight: 700, marginBottom: 6 }}>{t.demoPickTitle}</h2>
+            <p style={{ color: C.gray, fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>{t.demoPickSub}</p>
+            <div style={{ display: 'grid', gap: 14 }}>
+              {demoClips.map((demo) => {
+                const active = selectedDemo?.job_id === demo.job_id;
+                return (
+                  <button
+                    key={demo.job_id}
+                    onClick={() => setSelectedDemo(demo)}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '180px 1fr',
+                      gap: 16,
+                      alignItems: 'stretch',
+                      textAlign: 'left',
+                      background: active ? `${C.green}10` : C.bg,
+                      border: `1.5px solid ${active ? C.green : C.border}`,
+                      borderRadius: 14,
+                      overflow: 'hidden',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    <div style={{ position: 'relative', minHeight: 112, background: '#09131f' }}>
+                      {demo.thumbnail_url ? (
+                        <img src={demo.thumbnail_url} alt={demo.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      ) : null}
+                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(13,27,42,0.08) 0%, rgba(13,27,42,0.72) 100%)' }} />
+                      <div style={{
+                        position: 'absolute', top: 10, left: 10,
+                        fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
+                        textTransform: 'uppercase', color: C.bg, background: C.green,
+                        padding: '4px 8px', borderRadius: 999,
+                      }}>
+                        {t.demoBadge}
+                      </div>
+                    </div>
+                    <div style={{ padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
+                        <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 22, fontWeight: 700, color: C.white }}>
+                          {demo.title}
+                        </div>
+                        {active && (
+                          <span style={{ color: C.green, fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                            {t.demoReady}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ color: C.gray, fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
+                        {lang === 'th' ? demo.subtitle_th : demo.subtitle_en}
+                      </div>
+                      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12, color: C.grayLight }}>
+                        <span>{(demo.duration_s || 0).toFixed(1)} s</span>
+                        <span>· {demo.events_count || 0} events</span>
+                        <span>· {demo.frame_count || 0} frames</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 18, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button className="btn-primary" disabled={!selectedDemo} onClick={() => setStep(2)}>
+                {t.demoContinue}
+              </button>
+              <button className="btn-secondary" onClick={() => setScreen({ name: 'onboarding' })}>
+                {t.demoBackToUpload}
+              </button>
+            </div>
+          </div>
+        )}
+
         {step === 2 && (
           <div className="slide-up card" style={{ padding: 32 }}>
             <h2 style={{ fontSize: 26, fontWeight: 700, marginBottom: 6 }}>{t.onbTag}</h2>
@@ -651,6 +921,22 @@ function Onboarding({ setScreen, lang, preselected }) {
             {file && <div style={{ marginBottom: 18, fontSize: 13, color: C.grayLight, fontFamily: 'monospace', padding: '8px 12px', background: C.bg, borderRadius: 8, border: `1px solid ${C.border}` }}>
               📁 {file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB
             </div>}
+            {demoMode && selectedDemo && (
+              <div style={{ marginBottom: 18, padding: '12px 14px', background: C.bg, borderRadius: 10, border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 11, color: C.green, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>
+                  {t.demoSelected}
+                </div>
+                <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 20, fontWeight: 700, color: C.white, marginBottom: 4 }}>
+                  {selectedDemo.title}
+                </div>
+                <div style={{ fontSize: 13, color: C.grayLight, lineHeight: 1.6 }}>
+                  {lang === 'th' ? selectedDemo.subtitle_th : selectedDemo.subtitle_en}
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, color: C.gray }}>
+                  {t.demoNoUpload}
+                </div>
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, display: 'block' }}>{t.sessionType}</label>
@@ -686,6 +972,10 @@ function Onboarding({ setScreen, lang, preselected }) {
                     <div style={{ height: '100%', width: `${uploadPct}%`, background: `linear-gradient(90deg, ${C.green}, #00C4FF)`, borderRadius: 4, transition: 'width 0.2s' }} />
                   </div>
                 </div>
+              ) : demoMode ? (
+                <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 4, fontSize: 16 }} onClick={startDemoFlow}>
+                  {t.startAnalysis}
+                </button>
               ) : (
                 <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 4, fontSize: 16 }} onClick={startUpload}>
                   {t.startAnalysis}
@@ -695,8 +985,12 @@ function Onboarding({ setScreen, lang, preselected }) {
           </div>
         )}
 
-        {step === 3 && jobId && (
+        {step === 3 && jobId && !demoMode && (
           <ProgressScreen jobId={jobId} lang={lang} onDone={() => setStep(4)} />
+        )}
+
+        {step === 3 && jobId && demoMode && selectedDemo && (
+          <DemoProgressScreen demo={selectedDemo} lang={lang} onDone={() => setStep(4)} />
         )}
 
         {step === 4 && jobId && (
@@ -773,6 +1067,69 @@ function ProgressScreen({ jobId, lang, onDone }) {
   );
 }
 
+function DemoProgressScreen({ demo, lang, onDone }) {
+  const t = T[lang];
+  const stages = [
+    lang === 'th' ? 'กำลังโหลดคลิปเดโมเข้าระบบ…' : 'Loading demo clip into the pipeline…',
+    lang === 'th' ? 'กำลังอ่าน refined tracking ที่เตรียมไว้…' : 'Reading precomputed refined tracking…',
+    lang === 'th' ? 'กำลังคำนวณ spread / compactness metrics…' : 'Computing spread / compactness metrics…',
+    lang === 'th' ? 'กำลังเตรียม overlay และจังหวะสำคัญ…' : 'Preparing the overlay and key moments…',
+    lang === 'th' ? 'กำลังเปิดหน้าวิเคราะห์สำหรับเดโม…' : 'Opening the final analysis view…',
+  ];
+  const [stageIndex, setStageIndex] = useState(1);
+
+  useEffect(() => {
+    let cancelled = false;
+    const delays = [900, 1300, 1400, 1500, 900];
+    let acc = 0;
+    const timers = delays.map((delay, idx) => {
+      acc += delay;
+      return setTimeout(() => {
+        if (cancelled) return;
+        const next = idx + 1;
+        setStageIndex(next);
+        if (next === stages.length) {
+          setTimeout(() => {
+            if (!cancelled) onDone?.();
+          }, 700);
+        }
+      }, acc);
+    });
+    return () => {
+      cancelled = true;
+      timers.forEach((timer) => clearTimeout(timer));
+    };
+  }, [onDone, stages.length]);
+
+  const pct = Math.round((stageIndex / stages.length) * 100);
+  const title = demo.title || demo.opponent || demo.filename;
+  return (
+    <div className="card slide-up" style={{ padding: 48, textAlign: 'center' }}>
+      <div style={{ position: 'relative', width: 80, height: 80, margin: '0 auto 28px' }}>
+        <div style={{ width: 80, height: 80, borderRadius: '50%', border: `3px solid ${C.green}33`, animation: 'spin 2s linear infinite', position: 'absolute' }} />
+        <div style={{ width: 80, height: 80, borderRadius: '50%', border: '3px solid transparent', borderTopColor: C.green, animation: 'spin 1.2s linear infinite', position: 'absolute' }} />
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30 }}>🎬</div>
+      </div>
+      <div style={{ fontSize: 11, color: C.green, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
+        {t.demoFlow}
+      </div>
+      <h2 style={{ fontSize: 22, fontWeight: 700, color: C.green, marginBottom: 6 }}>{t.demoProcessing}</h2>
+      <p style={{ color: C.grayLight, fontSize: 14, marginBottom: 6 }}>{title}</p>
+      <p style={{ color: C.gray, fontSize: 12, marginBottom: 22 }}>
+        {(demo.duration_s || 0).toFixed(1)} s · {demo.events_count || 0} events · {demo.frame_count || 0} frames
+      </p>
+      <p style={{ color: C.grayLight, fontSize: 14, marginBottom: 10, minHeight: 20 }}>{stages[Math.max(0, stageIndex - 1)]}</p>
+      <p style={{ color: C.gray, fontSize: 12, marginBottom: 24 }}>{t.demoNoUpload}</p>
+      <div style={{ height: 4, background: C.border, borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ height: '100%', background: `linear-gradient(90deg, ${C.green}, #00D4FF)`, borderRadius: 2, width: `${pct}%`, transition: 'width 0.6s ease' }} />
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11, color: C.gray, fontFamily: 'monospace' }}>
+        Step {stageIndex} of {stages.length}
+      </div>
+    </div>
+  );
+}
+
 function DoneScreen({ jobId, lang, setScreen }) {
   const t = T[lang];
   const [job, setJob] = useState(null);
@@ -834,9 +1191,18 @@ function Analysis({ setScreen, lang, jobId }) {
   if (!data) return <div style={{ padding: 40, color: C.gray }}>…</div>;
 
   const { job, metrics, explanation } = data;
+  const isDemo = !!job.is_demo;
 
   const labelA = myTeam === 'A' ? t.yourTeam : myTeam === 'B' ? t.opponent : t.teamALabel;
   const labelB = myTeam === 'B' ? t.yourTeam : myTeam === 'A' ? t.opponent : t.teamBLabel;
+
+  const summary = metrics.summary || {};
+  const teamA = summary.team_A?.hull_area?.mean || 0;
+  const teamB = summary.team_B?.hull_area?.mean || 0;
+  const gap = summary.centroid_distance?.mean || 0;
+  const events = metrics.events || [];
+  const stretchCount = events.filter((e) => e.type === 'stretch').length;
+  const compressCount = events.filter((e) => e.type === 'compactness_spike').length;
 
   const spreadTag = (area, other) => {
     if (!area || !other) return null;
@@ -847,14 +1213,6 @@ function Analysis({ setScreen, lang, jobId }) {
   };
   const tagA = spreadTag(teamA, teamB);
   const tagB = spreadTag(teamB, teamA);
-
-  const summary = metrics.summary || {};
-  const teamA = summary.team_A?.hull_area?.mean || 0;
-  const teamB = summary.team_B?.hull_area?.mean || 0;
-  const gap = summary.centroid_distance?.mean || 0;
-  const events = metrics.events || [];
-  const stretchCount = events.filter((e) => e.type === 'stretch').length;
-  const compressCount = events.filter((e) => e.type === 'compactness_spike').length;
 
   const ball   = metrics.ball_metrics || {};
   const poss   = ball.possession_pct || {};
@@ -877,6 +1235,18 @@ function Analysis({ setScreen, lang, jobId }) {
           <span style={{ color: C.white }}>
             {job.opponent || job.filename}
           </span>
+          {isDemo ? (
+            <>
+              <span>·</span>
+              <span style={{
+                color: C.green, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
+                textTransform: 'uppercase', padding: '3px 8px', borderRadius: 999,
+                border: `1px solid ${C.green}44`, background: `${C.green}14`,
+              }}>
+                {t.demoBadge}
+              </span>
+            </>
+          ) : null}
           <span style={{ color: C.gray }}>· {(job.duration_s || 0).toFixed(1)}s · {(job.fps || 0).toFixed(0)} fps</span>
         </div>
 
@@ -884,7 +1254,7 @@ function Analysis({ setScreen, lang, jobId }) {
           {/* Left: video + chart + events */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
             <div className="card" style={{ overflow: 'hidden' }}>
-              <video ref={videoRef} src={`/api/jobs/${jobId}/overlay`} controls
+              <video ref={videoRef} src={overlayUrlForJob(jobId)} controls
                      style={{ width: '100%', display: 'block', background: '#000', aspectRatio: '16/9' }} />
               <div style={{ display: 'flex', gap: 16, padding: '10px 14px', borderTop: `1px solid ${C.border}` }}>
                 {[['A', C.teamA, labelA], ['B', C.teamB, labelB]].map(([ab, color, label]) => (
@@ -897,7 +1267,7 @@ function Analysis({ setScreen, lang, jobId }) {
             </div>
 
             {/* Ask Your AI Coach — chat grounded in this clip's metrics */}
-            <ChatPanel jobId={jobId} lang={lang} t={t} />
+            {!isDemo && <ChatPanel jobId={jobId} lang={lang} t={t} />}
 
             {/* Key moments */}
             <div className="card" style={{ padding: 16 }}>
@@ -1294,7 +1664,7 @@ function App() {
 
   let body;
   if (screen.name === 'onboarding') {
-    body = <Onboarding setScreen={setScreen} lang={lang} preselected={screen.preselected} />;
+    body = <Onboarding setScreen={setScreen} lang={lang} preselected={screen.preselected} demoMode={!!screen.demoMode} demoClipId={screen.demoClipId || null} />;
   } else if (screen.name === 'progress') {
     body = (
       <div style={{ flex: 1, padding: '40px 24px', overflowY: 'auto' }}>

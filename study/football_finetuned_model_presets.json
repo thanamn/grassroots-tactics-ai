@@ -1,0 +1,148 @@
+{
+  "uisikdag_yolov8_football_players": {
+    "description": "Production model source: uisikdag/yolo-v8-football-players-detection, labels ball/GK/player/referee.",
+    "source_url": "https://huggingface.co/uisikdag/yolo-v8-football-players-detection",
+    "model": "models/football_hf/uisikdag__yolo-v8-football-players-detection__best.pt",
+    "track_classes": [0, 1, 2],
+    "player_classes": [1, 2],
+    "ball_classes": [0],
+    "goalkeeper_classes": [1],
+    "confidence": 0.25,
+    "role": "production_source_multiclass"
+  },
+  "tmoklc_football_players": {
+    "description": "Football-finetuned multiclass detector with labels ball/GK/player/referee.",
+    "source_url": "https://huggingface.co/tmoklc/football-player-detection",
+    "model": "models/football_hf/tmoklc__football-player-detection__football-player-detection.pt",
+    "track_classes": [0, 1, 2],
+    "player_classes": [1, 2],
+    "ball_classes": [0],
+    "goalkeeper_classes": [1],
+    "confidence": 0.25,
+    "role": "football_multiclass"
+  },
+  "maerie88_football_players": {
+    "description": "Football-finetuned multiclass detector with labels ball/GK/player/referee.",
+    "source_url": "https://huggingface.co/maerie88/FOOTBALL-PLAYER-DETECTION-MODEL",
+    "model": "models/football_hf/maerie88__FOOTBALL-PLAYER-DETECTION-MODEL__best.pt",
+    "track_classes": [0, 1, 2],
+    "player_classes": [1, 2],
+    "ball_classes": [0],
+    "goalkeeper_classes": [1],
+    "confidence": 0.25,
+    "role": "football_multiclass"
+  },
+  "martinjolif_yolo11m_football_players": {
+    "description": "YOLO11m football player detector trained on martinjolif/football-player-detection.",
+    "source_url": "https://huggingface.co/martinjolif/yolo-football-player-detection",
+    "model": "models/football_hf/martinjolif__yolo-football-player-detection__yolo-football-player-detection.pt",
+    "track_classes": [0, 1, 2],
+    "player_classes": [1, 2],
+    "ball_classes": [0],
+    "goalkeeper_classes": [1],
+    "confidence": 0.25,
+    "role": "football_multiclass_yolo11m"
+  },
+  "hamza_yolov8_football_players": {
+    "description": "Football-finetuned multiclass detector with labels ball/GK/player/referee.",
+    "source_url": "https://huggingface.co/HamzaAliKhan/football-players-detection",
+    "model": "models/football_hf/HamzaAliKhan__football-players-detection__best_players_detection.pt",
+    "track_classes": [0, 1, 2],
+    "player_classes": [1, 2],
+    "ball_classes": [0],
+    "goalkeeper_classes": [1],
+    "confidence": 0.25,
+    "role": "football_multiclass"
+  },
+  "mobadam_yolo26l_football_players": {
+    "description": "YOLO26l football broadcast detector, labels ball/player/referee/GK.",
+    "source_url": "https://huggingface.co/mobadam/football-player-detection",
+    "model": "models/football_hf/mobadam__football-player-detection__player_detector.pt",
+    "track_classes": [0, 1, 3],
+    "player_classes": [1, 3],
+    "ball_classes": [0],
+    "goalkeeper_classes": [3],
+    "confidence": 0.25,
+    "role": "football_multiclass_yolo26l"
+  },
+  "asahwells_yolo26n_football": {
+    "description": "YOLO26n football-finetuned detector with labels ball/GK/player/referee.",
+    "source_url": "https://huggingface.co/asahwells/yolo26n-football-detection",
+    "model": "models/football_hf/asahwells__yolo26n-football-detection__weights__best.pt",
+    "track_classes": [0, 1, 2],
+    "player_classes": [1, 2],
+    "ball_classes": [0],
+    "goalkeeper_classes": [1],
+    "confidence": 0.25,
+    "role": "football_multiclass_yolo26n"
+  },
+  "jhsu12_yolov8n_football": {
+    "description": "Football-finetuned detector with labels ball/GK/player/referee.",
+    "source_url": "https://huggingface.co/jhsu12/yolov8n-football-finetuned",
+    "model": "models/football_hf/jhsu12__yolov8n-football-finetuned__weights__best.pt",
+    "track_classes": [0, 1, 2],
+    "player_classes": [1, 2],
+    "ball_classes": [0],
+    "goalkeeper_classes": [1],
+    "confidence": 0.25,
+    "role": "football_multiclass"
+  },
+  "hoseinshr_yolov8m_player_only": {
+    "description": "Football-finetuned player-only YOLOv8m detector; player class only, no ball class.",
+    "source_url": "https://huggingface.co/hoseinshr1055/yolov8-football-detection",
+    "model": "models/football_hf/hoseinshr1055__yolov8-football-detection__yolov8m_football_best_4.pt",
+    "track_classes": [0],
+    "player_classes": [0],
+    "ball_classes": [],
+    "goalkeeper_classes": [],
+    "confidence": 0.25,
+    "role": "football_player_only"
+  },
+  "parsagh_yolov8_football": {
+    "description": "Football-finetuned detector with labels ball/player/referee/other.",
+    "source_url": "https://huggingface.co/ParsaGh/yolov8_football",
+    "model": "models/football_hf/ParsaGh__yolov8_football__best.pt",
+    "track_classes": [0, 1],
+    "player_classes": [1],
+    "ball_classes": [0],
+    "goalkeeper_classes": [],
+    "confidence": 0.25,
+    "role": "football_multiclass_no_gk"
+  },
+  "martinjolif_yolo11n_ball": {
+    "description": "YOLO11n football-ball-only detector trained on martinjolif/football-ball-detection.",
+    "source_url": "https://huggingface.co/martinjolif/yolo-football-ball-detection",
+    "model": "models/football_hf/martinjolif__yolo-football-ball-detection__yolo-football-ball-detection.pt",
+    "track_classes": [0],
+    "player_classes": [],
+    "ball_classes": [0],
+    "goalkeeper_classes": [],
+    "confidence": 0.25,
+    "role": "football_ball_only",
+    "skip_team_assignment": true
+  },
+  "shahzain_soccerball_detector": {
+    "description": "Soccer-ball detector with class 1=soccerball; class 0 is not used.",
+    "source_url": "https://huggingface.co/ShahzainHaider/football_detection",
+    "model": "models/football_hf/ShahzainHaider__football_detection__ball_detector.pt",
+    "track_classes": [1],
+    "player_classes": [],
+    "ball_classes": [1],
+    "goalkeeper_classes": [],
+    "confidence": 0.25,
+    "role": "football_ball_only",
+    "skip_team_assignment": true
+  },
+  "rajat_soccer_ball": {
+    "description": "Soccer-ball-only detector with class 0=ball.",
+    "source_url": "https://huggingface.co/RajatDave/soccer-ball-detection",
+    "model": "models/football_hf/RajatDave__soccer-ball-detection__soccer_ball.pt",
+    "track_classes": [0],
+    "player_classes": [],
+    "ball_classes": [0],
+    "goalkeeper_classes": [],
+    "confidence": 0.25,
+    "role": "football_ball_only",
+    "skip_team_assignment": true
+  }
+}

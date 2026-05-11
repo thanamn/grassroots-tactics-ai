@@ -1,0 +1,268 @@
+{
+  "explainer_defensive_stretch_en": {
+    "task": "explainer",
+    "lang": "en",
+    "phase_context": "Team A defending in their own half after a turnover",
+    "description": "Team A compresses, then stretches badly. No ball labels are available.",
+    "metrics": {
+      "clip_id": "synthetic_defensive_stretch",
+      "fps": 25.0,
+      "duration_s": 15.0,
+      "summary": {
+        "team_A": {
+          "hull_area": {"mean": 11800, "min": 7900, "max": 14200, "std": 1620, "n": 375},
+          "spread_std": {"mean": 78, "min": 52, "max": 96, "std": 11, "n": 375}
+        },
+        "team_B": {
+          "hull_area": {"mean": 18400, "min": 13100, "max": 22800, "std": 2400, "n": 375},
+          "spread_std": {"mean": 102, "min": 78, "max": 124, "std": 13, "n": 375}
+        },
+        "centroid_distance": {"mean": 145, "min": 88, "max": 196, "std": 28, "n": 375}
+      },
+      "events": [
+        {"t": 4.2, "team": "team_A", "type": "compactness_spike", "delta_pct": -34.0, "hull_before": 12500, "hull_after": 8250},
+        {"t": 8.7, "team": "team_A", "type": "stretch", "delta_pct": 41.0, "hull_before": 9100, "hull_after": 12830},
+        {"t": 11.5, "team": "team_B", "type": "stretch", "delta_pct": 28.0, "hull_before": 16200, "hull_after": 20730}
+      ]
+    },
+    "expectations": {
+      "json_required": true,
+      "must_have_keys": ["headline", "implication", "coaching_cue"],
+      "needs_timestamps": true,
+      "should_mention_any": ["4.2", "8.7", "stretch", "compact"],
+      "should_not_mention": ["possession", "pass count", "passing accuracy"],
+      "ball_available": false
+    }
+  },
+  "explainer_stable_block_en": {
+    "task": "explainer",
+    "lang": "en",
+    "phase_context": "Team A holding a compact mid-block",
+    "description": "Stable compactness. Good models should avoid inventing a dramatic problem.",
+    "metrics": {
+      "clip_id": "synthetic_stable_block",
+      "fps": 25.0,
+      "duration_s": 18.0,
+      "summary": {
+        "team_A": {
+          "hull_area": {"mean": 9650, "min": 8900, "max": 10400, "std": 390, "n": 450},
+          "spread_std": {"mean": 63, "min": 58, "max": 70, "std": 4, "n": 450}
+        },
+        "team_B": {
+          "hull_area": {"mean": 17100, "min": 15300, "max": 18800, "std": 850, "n": 450},
+          "spread_std": {"mean": 94, "min": 82, "max": 106, "std": 8, "n": 450}
+        },
+        "centroid_distance": {"mean": 132, "min": 119, "max": 151, "std": 8, "n": 450}
+      },
+      "events": []
+    },
+    "expectations": {
+      "json_required": true,
+      "must_have_keys": ["headline", "implication", "coaching_cue"],
+      "stable_case": true,
+      "should_mention_any": ["stable", "compact", "mid-block", "shape"],
+      "should_not_mention": ["dangerous gap", "collapsed", "huge problem", "possession"]
+    }
+  },
+  "explainer_possession_pass_en": {
+    "task": "explainer",
+    "lang": "en",
+    "phase_context": "Team A trying to build out while Team B keeps more of the ball",
+    "description": "Ball labels and pass counts are available; the model should use them without overclaiming.",
+    "metrics": {
+      "clip_id": "synthetic_possession_pass",
+      "fps": 25.0,
+      "duration_s": 20.0,
+      "summary": {
+        "team_A": {
+          "hull_area": {"mean": 15100, "min": 10200, "max": 21400, "std": 3100, "n": 500},
+          "spread_std": {"mean": 97, "min": 64, "max": 132, "std": 19, "n": 500}
+        },
+        "team_B": {
+          "hull_area": {"mean": 12800, "min": 9300, "max": 16400, "std": 1700, "n": 500},
+          "spread_std": {"mean": 76, "min": 60, "max": 94, "std": 10, "n": 500}
+        },
+        "centroid_distance": {"mean": 112, "min": 71, "max": 174, "std": 31, "n": 500}
+      },
+      "events": [
+        {"t": 6.4, "team": "team_A", "type": "stretch", "delta_pct": 48.0, "hull_before": 11800, "hull_after": 17460},
+        {"t": 12.8, "team": "team_A", "type": "compactness_spike", "delta_pct": -31.0, "hull_before": 18900, "hull_after": 13040}
+      ],
+      "ball_metrics": {
+        "possession_pct": {"A": 36.0, "B": 57.0, "contested": 7.0},
+        "pass_count": {"A": 4, "B": 9},
+        "pass_accuracy": {"A": 0.5, "B": 0.78}
+      }
+    },
+    "expectations": {
+      "json_required": true,
+      "must_have_keys": ["headline", "implication", "coaching_cue"],
+      "needs_timestamps": true,
+      "ball_available": true,
+      "should_mention_any": ["36", "57", "4", "9", "possession", "passes"],
+      "should_not_mention": ["expected goals", "PPDA", "xT"]
+    }
+  },
+  "explainer_defensive_stretch_th": {
+    "task": "explainer",
+    "lang": "th",
+    "phase_context": "ทีม A กำลังตั้งรับในแดนตัวเองหลังเสียบอล",
+    "description": "Thai version of defensive-stretch case.",
+    "metrics": {
+      "clip_id": "synthetic_defensive_stretch_th",
+      "fps": 25.0,
+      "duration_s": 15.0,
+      "summary": {
+        "team_A": {
+          "hull_area": {"mean": 11800, "min": 7900, "max": 14200, "std": 1620, "n": 375},
+          "spread_std": {"mean": 78, "min": 52, "max": 96, "std": 11, "n": 375}
+        },
+        "team_B": {
+          "hull_area": {"mean": 18400, "min": 13100, "max": 22800, "std": 2400, "n": 375},
+          "spread_std": {"mean": 102, "min": 78, "max": 124, "std": 13, "n": 375}
+        },
+        "centroid_distance": {"mean": 145, "min": 88, "max": 196, "std": 28, "n": 375}
+      },
+      "events": [
+        {"t": 4.2, "team": "team_A", "type": "compactness_spike", "delta_pct": -34.0, "hull_before": 12500, "hull_after": 8250},
+        {"t": 8.7, "team": "team_A", "type": "stretch", "delta_pct": 41.0, "hull_before": 9100, "hull_after": 12830}
+      ]
+    },
+    "expectations": {
+      "json_required": true,
+      "must_have_keys": ["headline", "implication", "coaching_cue"],
+      "needs_thai": true,
+      "needs_timestamps": true,
+      "should_mention_any": ["4.2", "8.7", "วินาที", "ทีม A"],
+      "should_not_mention": ["expected goals", "PPDA", "xT"]
+    }
+  },
+  "chat_allowed_fix_first_en": {
+    "task": "chat",
+    "lang": "en",
+    "phase_context": "Team A defending in their own half after a turnover",
+    "question": "What is the first thing Team A should fix from this clip?",
+    "description": "Allowed coach-chat question that should be answered from spacing metrics.",
+    "metrics": {
+      "clip_id": "synthetic_chat_defense",
+      "fps": 25.0,
+      "duration_s": 15.0,
+      "summary": {
+        "team_A": {
+          "hull_area": {"mean": 11800, "min": 7900, "max": 14200, "std": 1620, "n": 375},
+          "spread_std": {"mean": 78, "min": 52, "max": 96, "std": 11, "n": 375}
+        },
+        "team_B": {
+          "hull_area": {"mean": 18400, "min": 13100, "max": 22800, "std": 2400, "n": 375},
+          "spread_std": {"mean": 102, "min": 78, "max": 124, "std": 13, "n": 375}
+        },
+        "centroid_distance": {"mean": 145, "min": 88, "max": 196, "std": 28, "n": 375}
+      },
+      "events": [
+        {"t": 4.2, "team": "team_A", "type": "compactness_spike", "delta_pct": -34.0, "hull_before": 12500, "hull_after": 8250},
+        {"t": 8.7, "team": "team_A", "type": "stretch", "delta_pct": 41.0, "hull_before": 9100, "hull_after": 12830}
+      ]
+    },
+    "expectations": {
+      "json_required": false,
+      "needs_timestamps": true,
+      "should_mention_any": ["8.7", "stretch", "spacing", "compact"],
+      "should_not_mention": ["formation", "4-3-3", "pressing"]
+    }
+  },
+  "chat_scope_guard_en": {
+    "task": "chat",
+    "lang": "en",
+    "phase_context": "General open play",
+    "question": "Should we switch to a 4-3-3 and press higher next game?",
+    "description": "Out-of-scope question. The model should redirect to supported metrics.",
+    "metrics": {
+      "clip_id": "synthetic_chat_scope",
+      "fps": 25.0,
+      "duration_s": 18.0,
+      "summary": {
+        "team_A": {
+          "hull_area": {"mean": 9650, "min": 8900, "max": 10400, "std": 390, "n": 450},
+          "spread_std": {"mean": 63, "min": 58, "max": 70, "std": 4, "n": 450}
+        },
+        "team_B": {
+          "hull_area": {"mean": 17100, "min": 15300, "max": 18800, "std": 850, "n": 450},
+          "spread_std": {"mean": 94, "min": 82, "max": 106, "std": 8, "n": 450}
+        },
+        "centroid_distance": {"mean": 132, "min": 119, "max": 151, "std": 8, "n": 450}
+      },
+      "events": []
+    },
+    "expectations": {
+      "out_of_scope": true,
+      "should_mention_any": ["spacing", "compactness", "metrics", "data"],
+      "should_not_mention": ["yes, switch", "you should press", "4-3-3 is better"]
+    }
+  },
+  "chat_allowed_pass_th": {
+    "task": "chat",
+    "lang": "th",
+    "phase_context": "ทีม A พยายามขึ้นเกมจากแดนหลัง",
+    "question": "จากข้อมูลนี้ ทีม A ควรปรับการส่งบอลยังไงก่อน?",
+    "description": "Thai allowed coach-chat question using ball/pass metrics.",
+    "metrics": {
+      "clip_id": "synthetic_chat_pass_th",
+      "fps": 25.0,
+      "duration_s": 20.0,
+      "summary": {
+        "team_A": {
+          "hull_area": {"mean": 15100, "min": 10200, "max": 21400, "std": 3100, "n": 500},
+          "spread_std": {"mean": 97, "min": 64, "max": 132, "std": 19, "n": 500}
+        },
+        "team_B": {
+          "hull_area": {"mean": 12800, "min": 9300, "max": 16400, "std": 1700, "n": 500},
+          "spread_std": {"mean": 76, "min": 60, "max": 94, "std": 10, "n": 500}
+        },
+        "centroid_distance": {"mean": 112, "min": 71, "max": 174, "std": 31, "n": 500}
+      },
+      "events": [
+        {"t": 6.4, "team": "team_A", "type": "stretch", "delta_pct": 48.0, "hull_before": 11800, "hull_after": 17460}
+      ],
+      "ball_metrics": {
+        "possession_pct": {"A": 36.0, "B": 57.0, "contested": 7.0},
+        "pass_count": {"A": 4, "B": 9},
+        "pass_accuracy": {"A": 0.5, "B": 0.78}
+      }
+    },
+    "expectations": {
+      "needs_thai": true,
+      "should_mention_any": ["36", "4", "50", "ส่งบอล", "ครองบอล"],
+      "should_not_mention": ["xG", "PPDA", "half-space"]
+    }
+  },
+  "chat_scope_guard_th": {
+    "task": "chat",
+    "lang": "th",
+    "phase_context": "เกมเปิดทั่วไป",
+    "question": "เราควรเปลี่ยนเป็น 4-4-2 แล้วเพรสสูงไหม?",
+    "description": "Thai out-of-scope question. The model should redirect to spacing/compactness/pass data.",
+    "metrics": {
+      "clip_id": "synthetic_chat_scope_th",
+      "fps": 25.0,
+      "duration_s": 18.0,
+      "summary": {
+        "team_A": {
+          "hull_area": {"mean": 9650, "min": 8900, "max": 10400, "std": 390, "n": 450},
+          "spread_std": {"mean": 63, "min": 58, "max": 70, "std": 4, "n": 450}
+        },
+        "team_B": {
+          "hull_area": {"mean": 17100, "min": 15300, "max": 18800, "std": 850, "n": 450},
+          "spread_std": {"mean": 94, "min": 82, "max": 106, "std": 8, "n": 450}
+        },
+        "centroid_distance": {"mean": 132, "min": 119, "max": 151, "std": 8, "n": 450}
+      },
+      "events": []
+    },
+    "expectations": {
+      "out_of_scope": true,
+      "needs_thai": true,
+      "should_mention_any": ["ระยะ", "compactness", "ข้อมูล", "การยืน"],
+      "should_not_mention": ["ควรเปลี่ยน", "4-4-2 ดีกว่า", "เพรสสูงแน่นอน"]
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "football_players_conf015": {
+    "description": "Production football-specific weights at lower confidence; tests whether recall improves enough to justify more false positives.",
+    "model": "models/football_players.pt",
+    "track_classes": [0, 1, 2],
+    "confidence": 0.15,
+    "role": "football_low_conf"
+  },
+  "football_players_conf040": {
+    "description": "Production football-specific weights at higher confidence; tests whether cleaner detections improve precision and ball false positives.",
+    "model": "models/football_players.pt",
+    "track_classes": [0, 1, 2],
+    "confidence": 0.4,
+    "role": "football_high_conf"
+  },
+  "yolov8n": {
+    "description": "YOLOv8 nano COCO person detector; very fast generic baseline.",
+    "model": "yolov8n.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "fast_generic_v8"
+  },
+  "yolov8s": {
+    "description": "YOLOv8 small COCO person detector; older-generation balanced generic baseline.",
+    "model": "yolov8s.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "balanced_generic_v8"
+  },
+  "yolov8m": {
+    "description": "YOLOv8 medium COCO person detector; tests whether generic model scale helps player coverage.",
+    "model": "yolov8m.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "medium_generic_v8"
+  },
+  "yolov10n": {
+    "description": "YOLOv10 nano COCO person detector; fast modern generic baseline.",
+    "model": "yolov10n.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "fast_generic_v10"
+  },
+  "yolov10s": {
+    "description": "YOLOv10 small COCO person detector; balanced modern generic baseline.",
+    "model": "yolov10s.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "balanced_generic_v10"
+  },
+  "yolov10m": {
+    "description": "YOLOv10 medium COCO person detector; medium generic accuracy/speed tradeoff.",
+    "model": "yolov10m.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "medium_generic_v10"
+  },
+  "yolo11l": {
+    "description": "YOLO11 large COCO person detector; slow high-capacity generic baseline.",
+    "model": "yolo11l.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "large_generic_v11"
+  },
+  "yolo11x": {
+    "description": "YOLO11 extra-large COCO person detector; intentionally slow upper-capacity generic baseline.",
+    "model": "yolo11x.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "xlarge_generic_v11"
+  },
+  "rtdetr_l": {
+    "description": "RT-DETR large COCO person detector; transformer-style detector baseline with different architecture.",
+    "model": "rtdetr-l.pt",
+    "track_classes": [0],
+    "confidence": 0.25,
+    "role": "transformer_generic"
+  }
+}

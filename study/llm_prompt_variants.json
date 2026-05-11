@@ -1,0 +1,32 @@
+{
+  "current_v2": {
+    "description": "Current production tactical explainer prompt: grassroots coach persona, style guardrails, compact metrics, JSON fields.",
+    "mode": "current",
+    "use_json_mode": true,
+    "primary": true
+  },
+  "minimal_schema": {
+    "description": "Minimal schema-only prompt. Tests whether model quality alone can produce useful coaching text without detailed style constraints.",
+    "mode": "minimal_schema",
+    "use_json_mode": true,
+    "primary": false
+  },
+  "no_jargon_guard": {
+    "description": "Production prompt with the jargon/style guard weakened. Tests whether the guardrails materially improve grassroots readability.",
+    "mode": "no_jargon_guard",
+    "use_json_mode": true,
+    "primary": false
+  },
+  "metric_first": {
+    "description": "Production prompt plus explicit instruction to start from the largest metric/event before giving advice.",
+    "mode": "metric_first",
+    "use_json_mode": true,
+    "primary": false
+  },
+  "few_shot_coach": {
+    "description": "Production prompt plus one short example of acceptable coach-facing output.",
+    "mode": "few_shot_coach",
+    "use_json_mode": true,
+    "primary": false
+  }
+}

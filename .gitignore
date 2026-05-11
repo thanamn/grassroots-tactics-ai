@@ -8,6 +8,23 @@ data/jobs/*
 !data/cache/.gitkeep
 !data/jobs/.gitkeep
 
+# Evaluation data — keep only the curated annotation/manifests/demo bundle
+data/eval/*
+!data/eval/annotations/
+data/eval/annotations/*
+!data/eval/annotations/psg_annotation_v1.json
+!data/eval/manifests/
+data/eval/manifests/*
+!data/eval/manifests/psg_annotation_v1.json
+!data/eval/manifests/psg_eval_clips.json
+!data/eval/reports/
+data/eval/reports/*
+!data/eval/reports/psg_annotation_v1_psg_tracking_latest_v1_tracking_summary.csv
+!data/eval/runs/
+data/eval/runs/*
+!data/eval/runs/psg_annotated_base_convex_v1/
+!data/eval/runs/psg_annotated_base_convex_v1/**
+
 # Secrets
 .env
 
@@ -29,8 +46,8 @@ HCI_GRASS_ROOT_FOOTBALL*/
 # in case any reappear before the next commit
 ,-
 1``
-{,
-{'OK'
+\{,
+\{'OK'
 
 # Python
 __pycache__/

@@ -11,9 +11,27 @@ DATA_DIR = ROOT / "data"
 CLIPS_DIR = DATA_DIR / "clips"
 TRACKING_DIR = DATA_DIR / "tracking"
 CACHE_DIR = DATA_DIR / "cache"
+EVAL_DIR = DATA_DIR / "eval"
+EVAL_CLIPS_DIR = EVAL_DIR / "clips"
+EVAL_FRAMES_DIR = EVAL_DIR / "frames"
+EVAL_MANIFESTS_DIR = EVAL_DIR / "manifests"
+EVAL_ANNOTATIONS_DIR = EVAL_DIR / "annotations"
+EVAL_RUNS_DIR = EVAL_DIR / "runs"
+EVAL_REPORTS_DIR = EVAL_DIR / "reports"
 PROMPTS_DIR = ROOT / "prompts"
 
-for d in (CLIPS_DIR, TRACKING_DIR, CACHE_DIR):
+for d in (
+    CLIPS_DIR,
+    TRACKING_DIR,
+    CACHE_DIR,
+    EVAL_DIR,
+    EVAL_CLIPS_DIR,
+    EVAL_FRAMES_DIR,
+    EVAL_MANIFESTS_DIR,
+    EVAL_ANNOTATIONS_DIR,
+    EVAL_RUNS_DIR,
+    EVAL_REPORTS_DIR,
+):
     d.mkdir(parents=True, exist_ok=True)
 
 # --- Video / pitch -----------------------------------------------------

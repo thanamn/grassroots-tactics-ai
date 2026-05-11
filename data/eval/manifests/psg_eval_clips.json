@@ -1,0 +1,32 @@
+{
+  "manifest_id": "psg_eval_clips",
+  "created_at": "2026-05-06T06:26:01.059154+00:00",
+  "source_video": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai\\PSG-5-0-Inter-Milan.mp4",
+  "source_duration_s": 6749.12,
+  "fps": 25.0,
+  "width": 1920,
+  "height": 1080,
+  "clips": [
+    {
+      "clip_id": "psg_eval_01",
+      "video_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai\\data\\eval\\clips\\psg_eval_01.mp4",
+      "source_video": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai\\PSG-5-0-Inter-Milan.mp4",
+      "start_s": 900.0,
+      "duration_s": 20.0
+    },
+    {
+      "clip_id": "psg_eval_02",
+      "video_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai\\data\\eval\\clips\\psg_eval_02.mp4",
+      "source_video": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai\\PSG-5-0-Inter-Milan.mp4",
+      "start_s": 2700.0,
+      "duration_s": 20.0
+    },
+    {
+      "clip_id": "psg_eval_03",
+      "video_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai\\data\\eval\\clips\\psg_eval_03.mp4",
+      "source_video": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai\\PSG-5-0-Inter-Milan.mp4",
+      "start_s": 4200.0,
+      "duration_s": 20.0
+    }
+  ]
+}

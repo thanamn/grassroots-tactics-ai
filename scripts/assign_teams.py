@@ -63,6 +63,67 @@ REFEREE_CLUSTER_MAX_FRAC = 0.30
 # in hue (a*b*) but are clearly separated by luminance (L*).
 MIN_INTER_DIST = 12.0
 
+# In-shape filtering ----------------------------------------------------
+# Keep raw detections, but only let on-field outfield players contribute to
+# convex hulls/spacing. Sideline staff/subs often get detected as "player" and
+# can wear similar colours, so jersey clustering alone is not enough.
+# 0.18 (was 0.12) — coaches/staff standing near the touchline can have small
+# patches of grass at their feet on broadcast cameras, but a real on-pitch
+# player almost always has a clear majority of green pixels around their feet.
+FOOT_GRASS_MIN_RATIO = 0.18
+FOOT_PATCH_W_FRAC = 0.55
+FOOT_PATCH_H_FRAC = 0.18
+
+# Track-level non-player rules. Per-frame filters miss coaches whose foot
+# patch happens to clip a green technical-area mat, or wing players who run
+# very close to the touchline. Looking at the *whole track's* behaviour is
+# much more robust than judging one detection at a time.
+#
+# NON_PLAYER_STICKY_THRESH — if at least this fraction of a track's frames
+# were flagged sideline OR outlier, force the whole track non-player. This
+# overrides the standard role-majority vote, which used to let a 30/70
+# split sit as "outfield" and pull the hull.
+NON_PLAYER_STICKY_THRESH = 0.30
+# TRACK_AVG_Y_FRAC_THRESH — any track whose mean bbox-bottom / frame-height
+# stays above this for the clip is almost certainly a person standing in the
+# technical area. A genuine wing player dips this low occasionally but does
+# not average there.
+TRACK_AVG_Y_FRAC_THRESH = 0.88
+# Lowered from 0.60: with the sticky-sideline override above doing the heavy
+# lifting, the residual cases benefit from a more permissive role majority
+# so brief role mis-flags on legit players don't drop them from the hull.
+ROLE_MAJORITY_THRESH = 0.50
+
+
+def _grass_mask(frame_bgr: np.ndarray) -> np.ndarray:
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    return (
+        (hsv[:, :, 0] >= 35) & (hsv[:, :, 0] <= 90) &
+        (hsv[:, :, 1] > 45) &
+        (hsv[:, :, 2] > 35)
+    )
+
+
+def _foot_grass_ratio(frame_bgr: np.ndarray, bbox: list[float]) -> float:
+    """Grass ratio around the player's feet/bottom-centre point."""
+    h_img, w_img = frame_bgr.shape[:2]
+    x1, y1, x2, y2 = (float(v) for v in bbox)
+    bw = max(2.0, x2 - x1)
+    bh = max(4.0, y2 - y1)
+    cx = (x1 + x2) / 2.0
+
+    # Sample a small band around and just above the foot point. Players on the
+    # pitch usually have grass in this neighbourhood; staff/subs beyond the
+    # touchline often sit on track/concrete/bench areas.
+    px1 = int(max(0, cx - bw * FOOT_PATCH_W_FRAC))
+    px2 = int(min(w_img, cx + bw * FOOT_PATCH_W_FRAC))
+    py1 = int(max(0, y2 - bh * FOOT_PATCH_H_FRAC))
+    py2 = int(min(h_img, y2 + bh * 0.06))
+    if px2 <= px1 or py2 <= py1:
+        return 0.0
+    patch = _grass_mask(frame_bgr[py1:py2, px1:px2])
+    return float(np.mean(patch)) if patch.size else 0.0
+
 
 def _jersey_lab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
     """Return median (L*, a*, b*) of non-grass jersey pixels, or None.
@@ -169,6 +230,8 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
         frame_cache[fidx] = img
 
         for p in frame_data["players"]:
+            if p.get("interpolated"):
+                continue
             lab = _jersey_lab(img, p["bbox"])
             if lab is not None:
                 lab_samples.append(lab)
@@ -248,6 +311,12 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
     prev_fidx: int = -1
 
     assigned = total = 0
+    rejected_sideline = 0
+    rejected_goalkeeper = 0
+    # Per-track bottom-edge fraction history — used by the track-level
+    # sticky-sideline rule below. Collected here so we only walk the
+    # detections once instead of doing a separate pass.
+    y_frac_obs: dict[int, list[float]] = {}
     for frame_data in frames:
         fidx = frame_data["frame"]
         if not frame_data["players"]:
@@ -268,16 +337,42 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
         frame_h = img.shape[0] if img is not None else None
         for p in frame_data["players"]:
             total += 1
+            p["on_pitch"] = None
+            p["include_in_shape"] = False
+            p["shape_role"] = "unknown"
+            if frame_h:
+                y_frac_obs.setdefault(int(p["track_id"]), []).append(
+                    float(p["bbox"][3]) / float(frame_h)
+                )
             if img is None:
+                continue
+            if p.get("interpolated"):
+                continue
+            if p.get("cls") == 1:
+                p["on_pitch"] = True
+                p["include_in_shape"] = False
+                p["shape_role"] = "goalkeeper"
+                rejected_goalkeeper += 1
                 continue
             # Y-boundary guard: reject detections whose bottom edge is below
             # MAX_PLAYER_Y_FRAC of frame height. Technical-area staff (coaches,
             # physios, ball-boys) always appear in this bottom strip on broadcast
-            # tactical shots. GKs are exempt so a near-post GK isn't silenced.
+            # tactical shots.
             if MAX_PLAYER_Y_FRAC < 1.0 and p.get("cls") != 1:
                 y2 = p["bbox"][3]
                 if frame_h and y2 > frame_h * MAX_PLAYER_Y_FRAC:
+                    p["on_pitch"] = False
+                    p["shape_role"] = "sideline"
+                    rejected_sideline += 1
                     continue  # leave team=None
+            foot_grass_ratio = _foot_grass_ratio(img, p["bbox"])
+            p["foot_grass_ratio"] = round(foot_grass_ratio, 3)
+            if foot_grass_ratio < FOOT_GRASS_MIN_RATIO:
+                p["on_pitch"] = False
+                p["shape_role"] = "sideline"
+                rejected_sideline += 1
+                continue
+            p["on_pitch"] = True
             lab = _jersey_lab(img, p["bbox"])
             if lab is None:
                 continue
@@ -288,16 +383,132 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
             if OUTLIER_THRESH > 0 and p.get("cls") != 1:
                 dists_3d = np.linalg.norm(centres_3d - lab, axis=1)
                 if float(np.min(dists_3d)) > OUTLIER_THRESH:
+                    p["include_in_shape"] = False
+                    p["shape_role"] = "outlier"
                     continue  # leave team=None → excluded from hull/lines
             # Team assignment in full L*a*b* space — more robust than a*b*-only
             # when luminance is the discriminative dimension (dark vs bright kits).
             dists_assign = np.linalg.norm(centres_3d - lab, axis=1)
             best_tc   = team_clusters[int(np.argmin(dists_assign))]
             p["team"] = team_map[best_tc]
+            p["include_in_shape"] = True
+            p["shape_role"] = "outfield"
             assigned += 1
 
     cap2.release()
+
+    # Short tracker bridges do not have a real detection crop, and real
+    # detections can occasionally fail the jersey/outlier checks. Fill those
+    # holes from the track's majority team so one bad crop doesn't make the
+    # overlay blink a player out for a frame.
+    votes: dict[int, dict[str, int]] = {}
+    shape_votes: dict[int, dict[str, int]] = {}
+    for frame_data in frames:
+        for p in frame_data["players"]:
+            tid = int(p["track_id"])
+            team = p.get("team")
+            if team in ("A", "B"):
+                votes.setdefault(tid, {"A": 0, "B": 0})[team] += 1
+            role = p.get("shape_role")
+            if role in ("outfield", "goalkeeper", "sideline", "outlier"):
+                shape_votes.setdefault(tid, {
+                    "outfield": 0, "goalkeeper": 0, "sideline": 0, "outlier": 0,
+                })[role] += 1
+
+    track_team: dict[int, str] = {}
+    for tid, counts in votes.items():
+        total_votes = counts["A"] + counts["B"]
+        if total_votes < 2:
+            continue
+        team, n_votes = max(counts.items(), key=lambda item: item[1])
+        if n_votes / total_votes >= 0.65:
+            track_team[tid] = team
+
+    # Per-track mean bottom-edge fraction. Used by the y-frac sticky rule
+    # below — a track that consistently sits near the bottom of the frame is
+    # almost always technical-area staff, even if its individual detections
+    # passed the per-frame y/grass gates.
+    track_avg_y_frac: dict[int, float] = {
+        tid: sum(fracs) / len(fracs)
+        for tid, fracs in y_frac_obs.items()
+        if len(fracs) >= 3
+    }
+
+    track_role: dict[int, str] = {}
+    sticky_sideline_tracks = 0
+    sticky_y_frac_tracks = 0
+    for tid, counts in shape_votes.items():
+        total_votes = sum(counts.values())
+        if total_votes < 2:
+            continue
+        non_player = counts.get("sideline", 0) + counts.get("outlier", 0)
+        # Sticky-sideline override: if a non-trivial fraction of the track's
+        # frames were flagged sideline OR outlier, force the whole track
+        # non-player regardless of the outfield/GK majority. This stops the
+        # 30 % sideline / 70 % outfield split from leaking a coach into
+        # the convex hull.
+        if non_player / total_votes >= NON_PLAYER_STICKY_THRESH:
+            track_role[tid] = (
+                "sideline" if counts.get("sideline", 0) >= counts.get("outlier", 0)
+                else "outlier"
+            )
+            sticky_sideline_tracks += 1
+            continue
+        # Track-y sticky rule: average bottom-edge fraction over the clip is
+        # a strong signal — wing players dip low occasionally but do not
+        # average there, technical-area staff do.
+        avg_y = track_avg_y_frac.get(tid)
+        if avg_y is not None and avg_y >= TRACK_AVG_Y_FRAC_THRESH and counts.get("goalkeeper", 0) == 0:
+            track_role[tid] = "sideline"
+            sticky_y_frac_tracks += 1
+            continue
+        role, n_votes = max(counts.items(), key=lambda item: item[1])
+        if n_votes / total_votes >= ROLE_MAJORITY_THRESH:
+            track_role[tid] = role
+
+    inherited = 0
+    corrected = 0
+    role_inherited = 0
+    for frame_data in frames:
+        for p in frame_data["players"]:
+            tid = int(p["track_id"])
+            role = track_role.get(tid)
+            if role:
+                p["shape_role"] = role
+                p["include_in_shape"] = role == "outfield"
+                p["on_pitch"] = role in ("outfield", "goalkeeper")
+                if p.get("interpolated") or p.get("team") not in ("A", "B"):
+                    role_inherited += 1
+            team = track_team.get(tid)
+            if not team:
+                continue
+            if not p.get("include_in_shape"):
+                p["team"] = None
+                continue
+            if p.get("team") not in ("A", "B"):
+                p["team"] = team
+                inherited += 1
+            elif p["team"] != team:
+                p["team"] = team
+                corrected += 1
+
+    if sticky_sideline_tracks:
+        print(f"  Sticky-sideline override on {sticky_sideline_tracks} tracks "
+              f"(≥{int(NON_PLAYER_STICKY_THRESH*100)}% non-player frames)")
+    if sticky_y_frac_tracks:
+        print(f"  Y-frac override on {sticky_y_frac_tracks} tracks "
+              f"(avg bottom-edge ≥ {TRACK_AVG_Y_FRAC_THRESH:.2f} of frame height)")
     print(f"  Assigned {assigned}/{total} players ({100*assigned//total}%)")
+    if inherited:
+        print(f"  Filled {inherited} short team-label gaps from track majority")
+    if corrected:
+        print(f"  Stabilized {corrected} noisy team labels from track majority")
+    if role_inherited:
+        print(f"  Inherited {role_inherited} in-shape/sideline roles from track history")
+    if rejected_goalkeeper:
+        print(f"  Excluded {rejected_goalkeeper} goalkeeper detections from hulls")
+    if rejected_sideline:
+        print(f"  Excluded {rejected_sideline} likely sideline/off-pitch detections")
 
     tracking_path.write_text(
         json.dumps(tracking, indent=2, ensure_ascii=False), encoding="utf-8"

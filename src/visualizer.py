@@ -26,11 +26,64 @@ TEAM_COLORS = {
 }
 
 # Temporal smoothing window (frames). Hull is built from the union of the last
-# SMOOTH_W frames so that a player missing for 1–3 frames due to occlusion or
-# a missed detection doesn't cause the hull to collapse and flicker.
-# At 25 fps, 7 frames ≈ 0.28 s — enough to bridge short gaps, short enough
-# that ghost positions don't linger visibly.
-SMOOTH_W = 7
+# SMOOTH_W frames so that a player missing for a few frames due to occlusion
+# or a missed detection doesn't cause the hull to collapse and flicker.
+# At 25 fps, 11 frames ≈ 0.44 s — bridges a longer gap than the previous
+# 7-frame value while staying short enough that the dot does not linger
+# after a player has genuinely left the area. Pairs with the longer tracker
+# emit window (max_flow_emit_lost=25) and offline stitch/gap-interp in
+# src/tracking.py — together they keep one player's dot from blinking in
+# and out across short detector dropouts.
+SMOOTH_W = 11
+MAX_HULL_PLAYERS_PER_TEAM = 10
+
+
+def _select_hull_points(points: np.ndarray,
+                        max_points: int = MAX_HULL_PLAYERS_PER_TEAM) -> np.ndarray:
+    """Choose stable hull inputs without hiding tracked player dots.
+
+    If tracking has extra team-coloured candidates, remove interior/duplicate
+    points first. Extreme players that define the actual team width/depth are
+    preserved unless there are still too many hull vertices.
+    """
+    if len(points) <= max_points:
+        return points
+
+    pts = points.astype(np.float32).copy()
+    while len(pts) > max_points:
+        removed_idx: int | None = None
+        if len(pts) >= 4:
+            try:
+                hull_indices = set(int(i) for i in ConvexHull(pts).vertices)
+                interior = [i for i in range(len(pts)) if i not in hull_indices]
+                if interior:
+                    centre = np.median(pts, axis=0)
+                    removed_idx = min(
+                        interior,
+                        key=lambda i: float(np.linalg.norm(pts[i] - centre)),
+                    )
+            except QhullError:
+                pass
+
+        if removed_idx is None:
+            # Fall back to removing one point from the closest pair, which is
+            # usually a duplicate/track split rather than a real shape edge.
+            best_pair = None
+            best_dist = float("inf")
+            for i in range(len(pts)):
+                for j in range(i + 1, len(pts)):
+                    d = float(np.linalg.norm(pts[i] - pts[j]))
+                    if d < best_dist:
+                        best_dist = d
+                        best_pair = (i, j)
+            if best_pair is None:
+                break
+            centre = np.median(pts, axis=0)
+            i, j = best_pair
+            removed_idx = i if np.linalg.norm(pts[i] - centre) < np.linalg.norm(pts[j] - centre) else j
+
+        pts = np.delete(pts, removed_idx, axis=0)
+    return pts
 
 
 def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
@@ -49,6 +102,7 @@ def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
     lo = max(0, frame_idx - window + 1)
     # track_id → {positions: [(x,y)...], gk_count: int, total: int}
     team_tracks: dict[str, dict[int, dict]] = {"A": {}, "B": {}}
+    has_shape_flags: dict[str, bool] = {"A": False, "B": False}
 
     for fi in range(lo, frame_idx + 1):
         fd = frames_by_idx.get(fi)
@@ -57,6 +111,9 @@ def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
         for p in fd["players"]:
             t = p.get("team")
             if t not in ("A", "B"):
+                continue
+            has_shape_flags[t] = has_shape_flags[t] or "include_in_shape" in p
+            if p.get("include_in_shape") is False:
                 continue
             tid = p["track_id"]
             d = team_tracks[t].setdefault(tid, {"pos": [], "gk": 0, "n": 0})
@@ -76,14 +133,19 @@ def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
                 gks.append((avg_x, avg_y))
             else:
                 outfield.append((avg_x, avg_y))
-        result[team] = {"outfield": outfield, "gks": gks}
+        result[team] = {
+            "outfield": outfield,
+            "gks": gks,
+            "legacy_no_shape_flags": not has_shape_flags[team],
+        }
     return result
 
 
 def _draw_team(frame: np.ndarray,
                outfield: list[tuple[float, float]],
                gks: list[tuple[float, float]],
-               color: tuple[int, int, int]) -> None:
+               color: tuple[int, int, int],
+               legacy_no_shape_flags: bool = False) -> None:
     """Draw tactical overlay for one team.
 
     - Light convex hull fill shows the team's occupied zone.
@@ -96,12 +158,13 @@ def _draw_team(frame: np.ndarray,
       info is available (legacy JSON produced before this fix).
     """
     pts = np.asarray(outfield, dtype=np.float32) if outfield else np.empty((0, 2), dtype=np.float32)
+    hull_pts_src = _select_hull_points(pts)
 
     # Legacy fallback: if no GK was identified via cls, drop the player
     # furthest from the team centroid (the old proxy).
-    if len(gks) == 0 and len(pts) >= 4:
-        c = pts.mean(axis=0)
-        pts = pts[np.argsort(np.linalg.norm(pts - c, axis=1))[:-1]]
+    if legacy_no_shape_flags and len(gks) == 0 and len(hull_pts_src) >= 4:
+        c = hull_pts_src.mean(axis=0)
+        hull_pts_src = hull_pts_src[np.argsort(np.linalg.norm(hull_pts_src - c, axis=1))[:-1]]
 
     h, w = frame.shape[:2]
     # Max edge length: 30 % of the longer frame dimension.  Connects players
@@ -110,10 +173,10 @@ def _draw_team(frame: np.ndarray,
     max_edge_px = max(w, h) * 0.25
 
     # Light convex-hull fill — keeps the team-zone feel without cluttering lines
-    if len(pts) >= 3:
+    if len(hull_pts_src) >= 3:
         try:
-            hull = ConvexHull(pts)
-            hull_pts = pts[hull.vertices].astype(np.int32)
+            hull = ConvexHull(hull_pts_src)
+            hull_pts = hull_pts_src[hull.vertices].astype(np.int32)
             overlay = frame.copy()
             cv2.fillPoly(overlay, [hull_pts], color)
             cv2.addWeighted(overlay, 0.13, frame, 0.87, 0, dst=frame)
@@ -123,12 +186,12 @@ def _draw_team(frame: np.ndarray,
     # Draw lines between every pair of outfield players within max_edge_px.
     # Simpler than Delaunay: avoids the problematic long outer-boundary edges
     # that Delaunay forces between isolated players. O(n²) is fine for n≤11.
-    for i in range(len(pts)):
-        for j in range(i + 1, len(pts)):
-            edge_len = float(np.linalg.norm(pts[i] - pts[j]))
+    for i in range(len(hull_pts_src)):
+        for j in range(i + 1, len(hull_pts_src)):
+            edge_len = float(np.linalg.norm(hull_pts_src[i] - hull_pts_src[j]))
             if edge_len <= max_edge_px:
-                p1 = (int(pts[i, 0]), int(pts[i, 1]))
-                p2 = (int(pts[j, 0]), int(pts[j, 1]))
+                p1 = (int(hull_pts_src[i, 0]), int(hull_pts_src[i, 1]))
+                p2 = (int(hull_pts_src[j, 0]), int(hull_pts_src[j, 1]))
                 cv2.line(frame, p1, p2, color, 2, cv2.LINE_AA)
 
     # Outfield player dots
@@ -136,18 +199,9 @@ def _draw_team(frame: np.ndarray,
         cv2.circle(frame, (int(x), int(y)), 5, color, -1)
         cv2.circle(frame, (int(x), int(y)), 5, (0, 0, 0), 1)
 
-    # GK: larger circle + white cross so it's visually distinct
-    for x, y in gks:
-        ix, iy = int(x), int(y)
-        cv2.circle(frame, (ix, iy), 8, color, -1)
-        cv2.circle(frame, (ix, iy), 8, (255, 255, 255), 2)
-        d = 5
-        cv2.line(frame, (ix - d, iy - d), (ix + d, iy + d), (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.line(frame, (ix + d, iy - d), (ix - d, iy + d), (255, 255, 255), 2, cv2.LINE_AA)
-
     # Team centroid dot
-    if len(pts) > 0:
-        cx, cy = pts.mean(axis=0).astype(int)
+    if len(hull_pts_src) > 0:
+        cx, cy = hull_pts_src.mean(axis=0).astype(int)
         cv2.circle(frame, (int(cx), int(cy)), 7, color, -1)
         cv2.circle(frame, (int(cx), int(cy)), 7, (255, 255, 255), 2)
 
@@ -184,8 +238,8 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
             break
         smoothed = _smoothed_teams(frames_by_idx, frame_idx, window=window)
         for team, color in TEAM_COLORS.items():
-            data = smoothed.get(team, {"outfield": [], "gks": []})
-            _draw_team(frame, data["outfield"], data["gks"], color)
+            data = smoothed.get(team, {"outfield": [], "gks": [], "legacy_no_shape_flags": False})
+            _draw_team(frame, data["outfield"], data["gks"], color, data["legacy_no_shape_flags"])
         writer.write(frame)
         frame_idx += 1
 

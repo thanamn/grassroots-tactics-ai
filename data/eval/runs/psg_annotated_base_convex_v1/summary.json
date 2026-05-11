@@ -1,0 +1,41 @@
+{
+  "run_id": "psg_annotated_base_convex_v1",
+  "manifest_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\annotations\\psg_annotation_v1.json",
+  "tracking_run": "psg_tracking_latest_v1",
+  "preset": "football_players",
+  "clips": [
+    {
+      "clip_id": "psg_eval_01",
+      "base_tracking_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_tracking_latest_v1\\football_players\\tracking_with_teams\\psg_eval_01.json",
+      "refined_tracking_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\refined_tracking\\psg_eval_01.json",
+      "trimmed_video_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\trimmed_clips\\psg_eval_01.mp4",
+      "overlay_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\overlays\\psg_eval_01_overlay.mp4",
+      "metrics_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\metrics\\psg_eval_01_metrics.json",
+      "frame_count": 501,
+      "annotated_players": 21,
+      "ball_available": true
+    },
+    {
+      "clip_id": "psg_eval_02",
+      "base_tracking_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_tracking_latest_v1\\football_players\\tracking_with_teams\\psg_eval_02.json",
+      "refined_tracking_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\refined_tracking\\psg_eval_02.json",
+      "trimmed_video_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\trimmed_clips\\psg_eval_02.mp4",
+      "overlay_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\overlays\\psg_eval_02_overlay.mp4",
+      "metrics_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\metrics\\psg_eval_02_metrics.json",
+      "frame_count": 501,
+      "annotated_players": 21,
+      "ball_available": true
+    },
+    {
+      "clip_id": "psg_eval_03",
+      "base_tracking_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_tracking_latest_v1\\football_players\\tracking_with_teams\\psg_eval_03.json",
+      "refined_tracking_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\refined_tracking\\psg_eval_03.json",
+      "trimmed_video_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\trimmed_clips\\psg_eval_03.mp4",
+      "overlay_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\overlays\\psg_eval_03_overlay.mp4",
+      "metrics_path": "C:\\Users\\thana\\Desktop\\grassroots-tactics-ai_latest_review\\data\\eval\\runs\\psg_annotated_base_convex_v1\\metrics\\psg_eval_03_metrics.json",
+      "frame_count": 501,
+      "annotated_players": 21,
+      "ball_available": true
+    }
+  ]
+}
