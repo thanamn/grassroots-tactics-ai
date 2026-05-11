@@ -70,21 +70,36 @@ Pipeline modules:
   (1=GK, 2=outfield) by accumulating per-track class votes across frames;
   **`dominant_cls=1` when ≥5 frames AND >50% of votes were class 1** (raised
   from the original >40% / no minimum — prevents short-track false GK labels).
-  Ball detected as class 0, interpolated across short gaps (≤30 frames).
-  Team field left null here.
+  Calls YOLO with `iou=0.45` (stricter NMS than default 0.7) so the model
+  emits one bbox per player rather than 2-3 overlapping ones. Ball detected
+  as class 0, interpolated across short gaps (≤30 frames). Team field left
+  null here.
+- `scripts/dedupe_tracking.py` — post-tracking pass that merges any same-team
+  detections in a single frame whose feet positions are within 35 px of each
+  other, keeping the detection with the longest accumulated track history.
+  Catches the residual YOLO duplicates (~3-12% of detections) that survive
+  even with `iou=0.45` NMS. Wired into pipeline_runner._stage_assign_teams
+  so it always runs before the team k-means.
 - `scripts/assign_teams.py` — two-pass jersey colour clustering. Pass 1:
-  crop shirt zone (15–50% of bbox height), mask grass pixels in HSV, compute
-  median L\*a\*b\*. Fit **DBSCAN** on a\*b\* (no k assumption; falls back to
-  k-means k=2). When the k-means a\*b\* inter-cluster distance is below
-  `MIN_INTER_DIST=12`, retries in full 3-D L\*a\*b\* space (handles dark-navy
-  vs white kits where hue alone fails). Pass 2: assign every player to nearest
-  team centre in 3-D L\*a\*b\*. Two filters before assignment:
-  (a) **y-boundary filter** (`MAX_PLAYER_Y_FRAC=0.90`) — skips any detection
-  whose bbox bottom edge is below 90% of frame height; catches technical-area
-  coaching staff on broadcast tactical shots without needing pitch homography.
-  GKs (cls=1) are exempt.
-  (b) **outlier filter** (`OUTLIER_THRESH=40.0`) — skips non-GK detections
-  whose 3-D L\*a\*b\* distance from both team centres exceeds the threshold;
+  crop the **chest band** (30–65 % of bbox height × 25–75 % of bbox width —
+  central rectangle, avoids head/shorts/edge-grass), mask grass pixels in
+  HSV, compute median L\*a\*b\*. Cluster training only uses bboxes ≥32 px tall
+  (`MIN_TRAIN_BBOX_H_PX`) so noisy small-bbox samples don't pull centres
+  toward grass. Fit **DBSCAN** on full 3-D L\*a\*b\* (no k assumption); falls
+  back to **k-means k=2 in 3-D L\*a\*b\*** when DBSCAN finds <2 clusters.
+  Always 3-D — earlier versions clustered a\*b\* only and retried in 3-D
+  conditionally, which silently failed on luminance-distinct kits like
+  PSG-navy vs Arsenal-red where the a\*b\* distance was just above the retry
+  threshold. Pass 2: assign every player to nearest team centre in 3-D
+  L\*a\*b\*. Three filters before assignment:
+  (a) **y-boundary filter** (`MAX_PLAYER_Y_FRAC=0.83`) — skips any non-GK
+  detection whose bbox bottom edge is below 83% of frame height; catches
+  technical-area coaching staff on broadcast tactical shots.
+  (b) **large-bbox guard** (`MAX_BBOX_H_PX=60`, `MAX_BBOX_Y_FRAC=0.60`) —
+  skips non-GK detections taller than 60 px whose bottom edge is also below
+  60% of frame height; catches camera operators close to the lens.
+  (c) **outlier filter** (`OUTLIER_THRESH=40.0`) — skips non-GK detections
+  whose 3-D L*a*b* distance from both team centres exceeds the threshold;
   catches referees, linesmen, and staff in distinctive colours.
   Players left as `team=None` are excluded from hull/lines downstream.
 - `src/metrics.py` — convex hull area, team centroid, spread std,
@@ -128,14 +143,14 @@ Pipeline modules:
 
 ## Week 5 fixes applied (2026-05-08)
 
-Four bugs fixed during frame-by-frame overlay audit across all 5 UCL clips:
+Seven bugs fixed during frame-by-frame overlay audit:
 
 1. **Outlier filter was a no-op** — `assign_teams.py` had `pass` instead of
    `continue` in the outlier check, so referees/linesmen in distinctive
    colours were being assigned to teams anyway. Fixed to `continue`.
 
-2. **Team assignment was 2-D instead of 3-D** — pass 2 used a\*b\* distance
-   to assign teams, but the cluster centres were computed in 3-D L\*a\*b\*.
+2. **Team assignment was 2-D instead of 3-D** — pass 2 used a*b* distance
+   to assign teams, but the cluster centres were computed in 3-D L*a*b*.
    Mismatched dimensions silently degraded assignment quality. Fixed to use
    full 3-D distance consistently.
 
@@ -143,13 +158,33 @@ Four bugs fixed during frame-by-frame overlay audit across all 5 UCL clips:
    players briefly misclassified as GK got false markers. Raised to ≥5 frames
    AND >50%. Visualizer's smoothing window threshold raised to match.
 
-4. **Y-boundary filter missing** — coaching staff in team-coloured clothing
-   passed the outlier filter and pulled the convex hull toward the touchline.
-   Added `MAX_PLAYER_Y_FRAC=0.90` in assign_teams.py to silently exclude
-   detections in the bottom 10% of frame height (technical area strip).
+4. **Y-boundary filter** — coaching staff in team-coloured clothing passed the
+   outlier filter and pulled the convex hull toward the touchline. Added
+   `MAX_PLAYER_Y_FRAC=0.83` in assign_teams.py to exclude detections whose
+   bbox bottom edge is below 83% of frame height. GKs exempt.
 
-All fixes applied, all 5 clips re-processed. Tracking JSONs retroactively
-patched by `scripts/fix_tracking_cls.py`.
+5. **Large-bbox guard** — camera operators near the lens have disproportionately
+   large bboxes. Added guard in assign_teams.py pass-2 loop: non-GK detection
+   with `bbox_h > MAX_BBOX_H_PX=60` whose bottom edge is also below
+   `MAX_BBOX_Y_FRAC=0.60` of frame height is excluded (team=None).
+
+6. **Hull outlier guard** — added `_drop_hull_outliers()` in visualizer.py that
+   drops any outfield point more than 2.5x the median centroid distance before
+   drawing hull/lines. Catches stray misassigned detections that slip through
+   assign_teams.py filters.
+
+7. **Possession rounding** — ball_metrics.py fixed so A+B+contested always sums
+   to exactly 100.0. Frontend (web/app.jsx) updated to show the contested row
+   when > 0 and use .toFixed(1) for 1-decimal precision.
+
+All fixes applied. 3 clips with videos (0f12d477f510, 3b79cd09ce31, a14d115af5ee)
+fully re-processed. Metrics updated for all 9 jobs. Tracking JSONs retroactively
+patched by scripts/fix_tracking_cls.py.
+
+Note: 5 UCL clips (28986de4ebe1, 6a532b15a9ba, 895cb788c736, cecfb434ae74,
+dae7666f479d) have tracking JSONs but their video files are NOT on this Ubuntu
+machine — they were processed on a different device. Metrics re-computed from
+existing tracking data; overlay videos cannot be regenerated without source videos.
 
 ## Course timeline
 

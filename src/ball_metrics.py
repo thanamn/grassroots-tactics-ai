@@ -88,11 +88,12 @@ def compute_ball_metrics(
     if total_tracked == 0:
         return None
 
-    possession_pct = {
-        "A":         round(frames_A         / total_tracked * 100, 1),
-        "B":         round(frames_B         / total_tracked * 100, 1),
-        "contested": round(frames_contested / total_tracked * 100, 1),
-    }
+    # Round individually then correct the last value so the three always
+    # sum to exactly 100.0 — independent rounding can leave a 0.1 gap.
+    pct_a = round(frames_A         / total_tracked * 100, 1)
+    pct_b = round(frames_B         / total_tracked * 100, 1)
+    pct_c = round(100.0 - pct_a - pct_b, 1)
+    possession_pct = {"A": pct_a, "B": pct_b, "contested": pct_c}
 
     # ── possession spells ───────────────────────────────────────────────────
     # Collapse consecutive frames with the same (team, track_id) into spells.

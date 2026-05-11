@@ -104,6 +104,7 @@ const T = {
     explainerRetrying: 'Thinking…',
     possA: 'Team A possession',
     possB: 'Team B possession',
+    possContested: 'Contested',
     passCtA: 'Team A passes',
     passCtB: 'Team B passes',
     passAccA: 'Team A pass acc.',
@@ -192,6 +193,7 @@ const T = {
     explainerRetrying: 'กำลังคิด…',
     possA: 'ครองบอลทีม A',
     possB: 'ครองบอลทีม B',
+    possContested: 'แย่งบอล',
     passCtA: 'ส่งบอลทีม A',
     passCtB: 'ส่งบอลทีม B',
     passAccA: 'ความแม่นทีม A',
@@ -980,8 +982,13 @@ function Analysis({ setScreen, lang, jobId }) {
               <div className="card" style={{ padding: 20 }}>
                 <div style={{ fontSize: 11, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>{t.possTitle}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <MiniStat label={`${labelA} ${t.possLabel}`}  value={`${(poss.A  || 0).toFixed(0)}%`}  color={C.teamA} />
-                  <MiniStat label={`${labelB} ${t.possLabel}`}  value={`${(poss.B  || 0).toFixed(0)}%`}  color={C.teamB} />
+                  <MiniStat label={`${labelA} ${t.possLabel}`}  value={`${(poss.A  || 0).toFixed(1)}%`}  color={C.teamA} />
+                  <MiniStat label={`${labelB} ${t.possLabel}`}  value={`${(poss.B  || 0).toFixed(1)}%`}  color={C.teamB} />
+                  {(poss.contested || 0) > 0 && (
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <MiniStat label={t.possContested} value={`${(poss.contested || 0).toFixed(1)}%`} color={C.gray} />
+                    </div>
+                  )}
                   <MiniStat label={`${labelA} ${t.passLabel}`}  value={passes.A != null ? passes.A : '–'} color={C.teamA} />
                   <MiniStat label={`${labelB} ${t.passLabel}`}  value={passes.B != null ? passes.B : '–'} color={C.teamB} />
                   <MiniStat label={`${labelA} ${t.accLabel}`}   value={acc.A != null ? `${(acc.A * 100).toFixed(0)}%` : '–'} color={C.teamA} />

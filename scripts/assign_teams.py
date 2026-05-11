@@ -35,9 +35,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.config import TRACKING_DIR, CLIPS_DIR
 
 SAMPLE_EVERY = 5          # use every Nth frame for k-means fitting
-JERSEY_TOP    = 0.15      # skip top 15 % of bbox (head)
-JERSEY_BOTTOM = 0.50      # stop at 50 % of bbox — shirt zone, above shorts
+# Jersey crop: chest band, also tightened horizontally to the centre half of
+# the bbox. YOLO bboxes on broadcast tactical shots are loose — typically
+# 1.5-2x wider than the player's silhouette and extending above the head.
+# A 15-50% top-only crop (the previous default) sampled mostly grass on small
+# detections, which collapsed the median jersey colour toward grass-green and
+# made the team k-means unable to separate the two kits.
+JERSEY_TOP    = 0.30      # skip head + shoulders
+JERSEY_BOTTOM = 0.65      # stop above shorts
+JERSEY_LEFT   = 0.25      # centre half horizontally — drops grass/edge
+JERSEY_RIGHT  = 0.75
 MIN_CROP_PX   = 4         # ignore tiny boxes
+# Minimum bbox height (px) for samples used to fit k-means cluster centres.
+# Small detections on zoomed-out tactical shots (~20-30 px tall) yield only
+# a handful of jersey pixels, which after grass-masking and median-collapse
+# look ~grass-green and pull the cluster centres into the grass cluster.
+# Pass-2 assignment still uses every detection regardless of size.
+MIN_TRAIN_BBOX_H_PX = 32
 
 # Players whose jersey a*b* is farther than this from the nearest cluster
 # centre are treated as non-players (goalkeeper different colour, referee).
@@ -51,18 +65,19 @@ OUTLIER_THRESH = 40.0
 # GKs (cls=1) are exempt so a GK guarding the near goal is never silenced.
 # Set to 1.0 to disable (e.g. ground-level grassroots clips where the
 # technical area is off-camera or at the frame edge horizontally).
-MAX_PLAYER_Y_FRAC = 0.90
+MAX_PLAYER_Y_FRAC = 0.83
+
+# Camera operators and close-touchline staff have disproportionately large
+# bounding boxes because they stand near the camera lens. Real players at
+# broadcast distance have bbox heights of 22–45px. Anything taller than
+# MAX_BBOX_H_PX whose bottom edge is below MAX_BBOX_Y_FRAC is almost
+# certainly not a pitch player. GKs (cls=1) are exempt.
+MAX_BBOX_H_PX  = 60
+MAX_BBOX_Y_FRAC = 0.60
 
 # If the smallest k=3 cluster contains at least this fraction of players,
 # there is no obvious outlier group → fall back to k=2 assignment.
 REFEREE_CLUSTER_MAX_FRAC = 0.30
-
-# When k-means a*b* separation between the two team centres is below this
-# threshold, retry clustering in full L*a*b* space. Night games (e.g. PSG
-# dark navy vs Arsenal white/red under floodlights) can look nearly identical
-# in hue (a*b*) but are clearly separated by luminance (L*).
-MIN_INTER_DIST = 12.0
-
 
 def _jersey_lab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
     """Return median (L*, a*, b*) of non-grass jersey pixels, or None.
@@ -74,9 +89,12 @@ def _jersey_lab(frame_bgr: np.ndarray, bbox: list[float]) -> np.ndarray | None:
     """
     x1, y1, x2, y2 = (int(v) for v in bbox)
     h = y2 - y1
+    w = x2 - x1
     jy1 = y1 + int(h * JERSEY_TOP)
     jy2 = y1 + int(h * JERSEY_BOTTOM)
-    crop = frame_bgr[jy1:jy2, x1:x2]
+    jx1 = x1 + int(w * JERSEY_LEFT)
+    jx2 = x1 + int(w * JERSEY_RIGHT)
+    crop = frame_bgr[jy1:jy2, jx1:jx2]
     if crop.size < MIN_CROP_PX * MIN_CROP_PX * 3:
         return None
 
@@ -169,7 +187,14 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
         frame_cache[fidx] = img
 
         for p in frame_data["players"]:
-            lab = _jersey_lab(img, p["bbox"])
+            # Only use sufficiently large bboxes for cluster training. On
+            # zoomed-out shots small bboxes have just a few jersey pixels
+            # that get drowned out by motion blur and grass bleed; their
+            # noisy colour pulls the k-means centres toward grass-green.
+            bbox = p["bbox"]
+            if bbox[3] - bbox[1] < MIN_TRAIN_BBOX_H_PX:
+                continue
+            lab = _jersey_lab(img, bbox)
             if lab is not None:
                 lab_samples.append(lab)
 
@@ -178,15 +203,20 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
     if len(lab_samples) < 2:
         raise RuntimeError("Too few jersey samples — check that bboxes are valid.")
 
-    lab_arr = np.array(lab_samples)   # (N, 3)  L*, a*, b*
-    ab_arr  = lab_arr[:, 1:]          # (N, 2)  a*, b* — used for k-means
+    lab_arr = np.array(lab_samples)   # (N, 3)  L*, a*, b* — clustering input
 
-    # ── DBSCAN on a*b* — no need to guess k, outliers become noise (-1) ────────
-    # Falls back to k-means k=2 when sklearn is absent or DBSCAN yields < 2 clusters.
-    print(f"  {len(lab_samples)} jersey samples collected, fitting DBSCAN …")
+    # ── Cluster in full 3-D L*a*b* ──────────────────────────────────────────
+    # Earlier versions clustered only in a*b* (hue plane), retrying in 3-D
+    # only when a*b* separation was tiny. This silently failed on PSG-vs-
+    # Arsenal: a*b* distance was just above the retry threshold (~19) so 3-D
+    # was skipped, even though L* (luminance) was the only dimension that
+    # actually distinguished the two kits. Always clustering in 3-D removes
+    # the brittle threshold and works equally well for hue-distinct kits
+    # (hue dominates the 3-D distance) and luminance-distinct kits.
+    print(f"  {len(lab_samples)} jersey samples collected, fitting DBSCAN (3-D) …")
     try:
         from sklearn.cluster import DBSCAN as _DBSCAN
-        db = _DBSCAN(eps=22, min_samples=3, metric="euclidean").fit(ab_arr)
+        db = _DBSCAN(eps=25, min_samples=3, metric="euclidean").fit(lab_arr)
         raw_labels  = db.labels_          # -1 = noise/outlier
         cluster_ids = [l for l in np.unique(raw_labels) if l != -1]
     except ImportError:
@@ -195,8 +225,8 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
     if len(cluster_ids) >= 2:
         sizes = {l: int((raw_labels == l).sum()) for l in cluster_ids}
         top2  = sorted(sizes, key=sizes.get, reverse=True)[:2]  # two largest
-        centres3  = np.array([ab_arr[raw_labels == l].mean(axis=0) for l in top2])
-        labels3   = np.full(len(ab_arr), -1, dtype=int)
+        centres_3d = np.array([lab_arr[raw_labels == l].mean(axis=0) for l in top2])
+        labels3    = np.full(len(lab_arr), -1, dtype=int)
         labels3[raw_labels == top2[0]] = 0
         labels3[raw_labels == top2[1]] = 1
         team_clusters = [0, 1]
@@ -204,42 +234,30 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
               f"(sizes {sizes[top2[0]]}, {sizes[top2[1]]}; "
               f"{int((raw_labels == -1).sum())} noise points)")
     else:
-        print(f"  DBSCAN found < 2 clusters — falling back to k-means k=2 …")
-        centres3, labels3 = _kmeans_k(ab_arr, k=2, n_init=10, max_iter=100, seed=42)
+        print(f"  DBSCAN found < 2 clusters — falling back to k-means k=2 (3-D) …")
+        centres_3d, labels3 = _kmeans_k(lab_arr, k=2, n_init=10, max_iter=100, seed=42)
         team_clusters = [0, 1]
-        inter_dist_ab = float(np.linalg.norm(centres3[0] - centres3[1]))
-        if inter_dist_ab < MIN_INTER_DIST:
-            # a*b* (hue) failed to separate the two kits — retry in full L*a*b*.
-            # Night games with dark-navy vs white kits (e.g. PSG vs Arsenal) are
-            # nearly identical in hue but clearly different in luminance (L*).
-            print(f"  a*b* separation {inter_dist_ab:.1f} < {MIN_INTER_DIST} — "
-                  f"retrying with L*a*b* (3-D) …")
-            centres_lab, labels_lab = _kmeans_k(lab_arr, k=2, n_init=10,
-                                                max_iter=100, seed=42)
-            inter_dist_lab = float(np.linalg.norm(centres_lab[0] - centres_lab[1]))
-            if inter_dist_lab > inter_dist_ab:
-                centres3 = centres_lab[:, 1:]   # a*b* slice — keeps label logic intact
-                labels3  = labels_lab
-                print(f"  L*a*b* separation {inter_dist_lab:.1f} — using 3-D result")
 
-    # Deterministic labelling: cluster with lower a* → "A", other → "B"
+    inter_dist = float(np.linalg.norm(centres_3d[0] - centres_3d[1]))
+    print(f"  3-D L*a*b* inter-cluster distance = {inter_dist:.1f}")
+
+    # Deterministic labelling: cluster with lower a* (less red) → "A", other → "B"
     tc0, tc1 = team_clusters[0], team_clusters[1]
-    if centres3[tc0, 0] <= centres3[tc1, 0]:
+    if centres_3d[tc0, 1] <= centres_3d[tc1, 1]:
         team_map = {tc0: "A", tc1: "B"}
     else:
         team_map = {tc0: "B", tc1: "A"}
 
-    # Build 3-D cluster centres (L*a*b*) for the team clusters
+    # Refine cluster centres from the actually-assigned points (DBSCAN noise
+    # excluded). Falls back to the cluster's k-means/DBSCAN centre when empty.
     centres_3d = np.array([
-        lab_arr[labels3 == c].mean(axis=0) if (labels3 == c).any()
-        else np.array([128.0, centres3[c, 0], centres3[c, 1]])
+        lab_arr[labels3 == c].mean(axis=0) if (labels3 == c).any() else centres_3d[c]
         for c in team_clusters
-    ])   # shape (2, 3)
+    ])
 
-    inter_dist = float(np.linalg.norm(centres3[tc0] - centres3[tc1]))
     print(f"  Team A centre L*a*b* = {centres_3d[0].round(1)}")
     print(f"  Team B centre L*a*b* = {centres_3d[1].round(1)}")
-    print(f"  Inter-cluster distance (a*b*) = {inter_dist:.1f}  |  outlier threshold = {OUTLIER_THRESH}")
+    print(f"  Outlier threshold = {OUTLIER_THRESH}")
 
     # ── pass 2: assign every player in every frame ───────────────────────────
     print("Pass 2 — assigning team labels to all frames …")
@@ -277,6 +295,15 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
             if MAX_PLAYER_Y_FRAC < 1.0 and p.get("cls") != 1:
                 y2 = p["bbox"][3]
                 if frame_h and y2 > frame_h * MAX_PLAYER_Y_FRAC:
+                    continue  # leave team=None
+            # Large-bbox guard: camera operators close to the lens have
+            # disproportionately large boxes. Real pitch players at broadcast
+            # distance have bbox heights of 22–45 px. GKs are exempt.
+            if p.get("cls") != 1:
+                bbox_h_px = p["bbox"][3] - p["bbox"][1]
+                if (bbox_h_px > MAX_BBOX_H_PX
+                        and frame_h
+                        and p["bbox"][3] > frame_h * MAX_BBOX_Y_FRAC):
                     continue  # leave team=None
             lab = _jersey_lab(img, p["bbox"])
             if lab is None:

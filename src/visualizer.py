@@ -80,6 +80,7 @@ def _smoothed_teams(frames_by_idx: dict, frame_idx: int,
     return result
 
 
+
 def _draw_team(frame: np.ndarray,
                outfield: list[tuple[float, float]],
                gks: list[tuple[float, float]],
@@ -104,10 +105,17 @@ def _draw_team(frame: np.ndarray,
         pts = pts[np.argsort(np.linalg.norm(pts - c, axis=1))[:-1]]
 
     h, w = frame.shape[:2]
-    # Max edge length: 30 % of the longer frame dimension.  Connects players
-    # within the same unit (defensive / midfield line) without drawing wild
-    # diagonals across the entire pitch.
-    max_edge_px = max(w, h) * 0.25
+    # Scale dot/line sizes to frame resolution so they're visible on any input.
+    # Base calibrated for 1280×720; scale proportionally for other resolutions.
+    scale = max(w, h) / 1280.0
+    dot_r   = max(4, int(8  * scale))   # outfield player dot radius
+    gk_r    = max(6, int(11 * scale))   # GK circle radius
+    line_w  = max(2, int(2  * scale))   # formation line thickness
+    cross_d = max(5, int(7  * scale))   # GK cross arm length
+
+    # Connect players within 35 % of the longer frame dimension so wide
+    # fullbacks/wingers still get lines to their nearest teammates.
+    max_edge_px = max(w, h) * 0.35
 
     # Light convex-hull fill — keeps the team-zone feel without cluttering lines
     if len(pts) >= 3:
@@ -121,35 +129,32 @@ def _draw_team(frame: np.ndarray,
             pass
 
     # Draw lines between every pair of outfield players within max_edge_px.
-    # Simpler than Delaunay: avoids the problematic long outer-boundary edges
-    # that Delaunay forces between isolated players. O(n²) is fine for n≤11.
     for i in range(len(pts)):
         for j in range(i + 1, len(pts)):
             edge_len = float(np.linalg.norm(pts[i] - pts[j]))
             if edge_len <= max_edge_px:
                 p1 = (int(pts[i, 0]), int(pts[i, 1]))
                 p2 = (int(pts[j, 0]), int(pts[j, 1]))
-                cv2.line(frame, p1, p2, color, 2, cv2.LINE_AA)
+                cv2.line(frame, p1, p2, color, line_w, cv2.LINE_AA)
 
-    # Outfield player dots
+    # Outfield player dots — draw filled circle then black outline for contrast
     for x, y in pts:
-        cv2.circle(frame, (int(x), int(y)), 5, color, -1)
-        cv2.circle(frame, (int(x), int(y)), 5, (0, 0, 0), 1)
+        cv2.circle(frame, (int(x), int(y)), dot_r, color, -1)
+        cv2.circle(frame, (int(x), int(y)), dot_r, (0, 0, 0), 1)
 
     # GK: larger circle + white cross so it's visually distinct
     for x, y in gks:
         ix, iy = int(x), int(y)
-        cv2.circle(frame, (ix, iy), 8, color, -1)
-        cv2.circle(frame, (ix, iy), 8, (255, 255, 255), 2)
-        d = 5
-        cv2.line(frame, (ix - d, iy - d), (ix + d, iy + d), (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.line(frame, (ix + d, iy - d), (ix - d, iy + d), (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.circle(frame, (ix, iy), gk_r, color, -1)
+        cv2.circle(frame, (ix, iy), gk_r, (255, 255, 255), 2)
+        cv2.line(frame, (ix - cross_d, iy - cross_d), (ix + cross_d, iy + cross_d), (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.line(frame, (ix + cross_d, iy - cross_d), (ix - cross_d, iy + cross_d), (255, 255, 255), 2, cv2.LINE_AA)
 
     # Team centroid dot
     if len(pts) > 0:
         cx, cy = pts.mean(axis=0).astype(int)
-        cv2.circle(frame, (int(cx), int(cy)), 7, color, -1)
-        cv2.circle(frame, (int(cx), int(cy)), 7, (255, 255, 255), 2)
+        cv2.circle(frame, (int(cx), int(cy)), gk_r, color, -1)
+        cv2.circle(frame, (int(cx), int(cy)), gk_r, (255, 255, 255), 2)
 
 
 def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> None:

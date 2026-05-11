@@ -3,6 +3,7 @@ data/clips/*
 data/tracking/*
 data/cache/*
 data/jobs/*
+data/screenshots/
 !data/clips/.gitkeep
 !data/tracking/.gitkeep
 !data/cache/.gitkeep

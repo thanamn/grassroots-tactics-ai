@@ -192,6 +192,10 @@ def run_tracking(video_path: Path, model_name: str | None = None,
     gpu_name = torch.cuda.get_device_name(0) if DEVICE != 'cpu' else 'CPU only'
     print(f"[tracking] device={DEVICE!r} ({gpu_name}) "
           f"model={model_name} vid_stride={vid_stride} ball={model_has_ball}")
+    # iou=0.45 makes NMS more aggressive than the ultralytics default (0.7).
+    # On broadcast football the default leaves 2-3 overlapping boxes per
+    # player (head/torso/full body), each becoming its own track with
+    # duplicate dots in the overlay. 0.45 collapses them to one box.
     results = model.predict(
         source=str(video_path),
         classes=TRACK_CLASSES,
@@ -199,6 +203,7 @@ def run_tracking(video_path: Path, model_name: str | None = None,
         verbose=False,
         device=DEVICE,
         vid_stride=vid_stride,
+        iou=0.45,
     )
 
     frames: list[dict] = []

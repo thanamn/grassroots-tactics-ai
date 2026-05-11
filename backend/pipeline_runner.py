@@ -73,6 +73,37 @@ def _auto_tune(duration_s: float) -> tuple[int, str | None]:
     return 1, None
 
 
+def _probe_codec(video_path: Path) -> str:
+    """Return the video codec name (e.g. 'av1', 'h264', 'vp9')."""
+    import subprocess
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=codec_name",
+         "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip().lower()
+
+
+def _transcode_to_h264(src: Path) -> Path:
+    """Re-encode to H.264 in-place so OpenCV can decode it.
+
+    AV1 and some VP9 containers are not decodable by OpenCV's default
+    ffmpeg build on Linux. We transcode once before tracking; the output
+    overwrites the source so the rest of the pipeline is unaware.
+    """
+    tmp = src.with_suffix(".tmp.mp4")
+    import subprocess
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(src),
+         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+         "-c:a", "copy", str(tmp)],
+        check=True, capture_output=True,
+    )
+    tmp.replace(src)
+    print(f"[runner] Transcoded {src.name} to H.264")
+
+
 def _probe_duration(video_path: Path) -> float:
     """Return clip duration in seconds without running tracking yet."""
     import cv2
@@ -100,6 +131,10 @@ def _stage_tracking(job_id: str, video_path: Path,
 
 
 def _stage_assign_teams(tracking_path: Path, video_path: Path) -> None:
+    # Drop YOLO duplicate-box artefacts before clustering jersey colours so
+    # the k-means fit isn't biased by counting one player twice.
+    from scripts.dedupe_tracking import process as _dedupe
+    _dedupe(tracking_path)
     from scripts.assign_teams import assign_teams
     assign_teams(tracking_path, video_path)
 
@@ -182,6 +217,12 @@ def run(job_id: str) -> None:
     )
 
     try:
+        # AV1-encoded uploads can't be decoded by OpenCV — transcode first.
+        codec = _probe_codec(video_path)
+        if codec in ("av1", "vp9"):
+            update_job(job_id, stage_message=f"Transcoding {codec.upper()} video…")
+            _transcode_to_h264(video_path)
+
         _set_stage(job_id, 0)
         tracking_path = _stage_tracking(
             job_id, video_path, vid_stride=vid_stride, model_name=model_name,
