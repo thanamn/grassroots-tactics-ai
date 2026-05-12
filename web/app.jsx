@@ -71,6 +71,9 @@ const T = {
     doneSub: 'Found {events} spacing events in {dur}s of footage.',
     viewAnalysis: 'View full analysis →',
     backDash: '← Back',
+    videoMode: 'Video',
+    originalVideo: 'Original',
+    overlayVideo: 'AI overlay',
     momentsTitle: 'Key moments',
     momentsSub: 'Sudden ≥25% shape changes within 1.5 s',
     insightsTitle: 'What the AI sees',
@@ -184,6 +187,9 @@ const T = {
     doneSub: 'พบ {events} จังหวะรูปแบบเปลี่ยน ในคลิป {dur} วินาที',
     viewAnalysis: 'ดูผลวิเคราะห์ →',
     backDash: '← กลับ',
+    videoMode: 'วิดีโอ',
+    originalVideo: 'ต้นฉบับ',
+    overlayVideo: 'AI overlay',
     momentsTitle: 'ช่วงสำคัญ',
     momentsSub: 'การเปลี่ยนรูปแบบ ≥25% ภายใน 1.5 วินาที',
     insightsTitle: 'AI วิเคราะห์ว่า',
@@ -386,6 +392,11 @@ function overlayUrlForJob(jobId) {
   return isDemoJobId(jobId)
     ? `/api/demo/clips/${demoClipId(jobId)}/overlay`
     : `/api/jobs/${jobId}/overlay`;
+}
+function videoUrlForJob(jobId, job, mode) {
+  if (mode === 'overlay') return overlayUrlForJob(jobId);
+  if (isDemoJobId(jobId)) return `/api/demo/clips/${demoClipId(jobId)}/video`;
+  return job?.source_video_url || `/api/jobs/${jobId}/video`;
 }
 function formatDurationCompact(totalSeconds) {
   const secs = Math.max(0, Math.round(totalSeconds || 0));
@@ -790,6 +801,7 @@ function Onboarding({ setScreen, lang, preselected, demoMode = false, demoClipId
             <div style={{ display: 'grid', gap: 14 }}>
               {demoClips.map((demo) => {
                 const active = selectedDemo?.job_id === demo.job_id;
+                const previewSrc = demo.source_thumbnail_url || demo.thumbnail_url;
                 return (
                   <button
                     key={demo.job_id}
@@ -808,12 +820,16 @@ function Onboarding({ setScreen, lang, preselected, demoMode = false, demoClipId
                     }}
                   >
                     <div style={{ position: 'relative', minHeight: 112, background: '#09131f' }}>
-                      {demo.source_video_url ? (
+                      {previewSrc ? (
+                        <img
+                          src={previewSrc}
+                          alt={`${demo.title} source clip preview`}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                      ) : demo.source_video_url ? (
                         <video
                           src={demo.source_video_url}
-                          autoPlay
                           muted
-                          loop
                           playsInline
                           preload="metadata"
                           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
@@ -822,6 +838,9 @@ function Onboarding({ setScreen, lang, preselected, demoMode = false, demoClipId
                         <div style={{ width: '100%', height: '100%', background: '#0a1826' }} />
                       )}
                       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(13,27,42,0.05) 0%, rgba(13,27,42,0.55) 100%)' }} />
+                      <div style={{ position: 'absolute', left: 10, bottom: 10, padding: '4px 8px', borderRadius: 999, background: 'rgba(3,7,12,0.72)', color: C.white, fontSize: 11, fontWeight: 700 }}>
+                        {t.originalVideo}
+                      </div>
                     </div>
                     <div style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
@@ -1161,6 +1180,7 @@ function Analysis({ setScreen, lang, jobId }) {
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState(null);
   const [myTeam, setMyTeam] = useState(null);
+  const [videoMode, setVideoMode] = useState('overlay');
   const videoRef = useRef(null);
 
   const reload = useCallback(async () => {
@@ -1199,6 +1219,7 @@ function Analysis({ setScreen, lang, jobId }) {
   const events = metrics.events || [];
   const stretchCount = events.filter((e) => e.type === 'stretch').length;
   const compressCount = events.filter((e) => e.type === 'compactness_spike').length;
+  const videoSrc = videoUrlForJob(jobId, job, videoMode);
 
   const spreadTag = (area, other) => {
     if (!area || !other) return null;
@@ -1238,7 +1259,32 @@ function Analysis({ setScreen, lang, jobId }) {
           {/* Left: video + chart + events */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
             <div className="card" style={{ overflow: 'hidden' }}>
-              <video ref={videoRef} src={overlayUrlForJob(jobId)} controls
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', borderBottom: `1px solid ${C.border}` }}>
+                <span style={{ fontSize: 11, color: C.gray, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{t.videoMode}</span>
+                <div style={{ display: 'inline-flex', padding: 3, borderRadius: 8, background: C.bg, border: `1px solid ${C.border}` }}>
+                  {[
+                    ['original', t.originalVideo],
+                    ['overlay', t.overlayVideo],
+                  ].map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      onClick={() => setVideoMode(mode)}
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: videoMode === mode ? C.bg : C.grayLight,
+                        background: videoMode === mode ? C.green : 'transparent',
+                        border: 'none',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <video key={videoMode} ref={videoRef} src={videoSrc} controls
                      style={{ width: '100%', display: 'block', background: '#000', aspectRatio: '16/9' }} />
               <div style={{ display: 'flex', gap: 16, padding: '10px 14px', borderTop: `1px solid ${C.border}` }}>
                 {[['A', C.teamA, labelA], ['B', C.teamB, labelB]].map(([ab, color, label]) => (

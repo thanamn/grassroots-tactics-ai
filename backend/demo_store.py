@@ -79,6 +79,11 @@ def _source_video_path(clip_id: str) -> Path:
     return Path(clip["trimmed_video_path"])
 
 
+def _source_thumbnail_path(clip_id: str) -> Path | None:
+    thumbnail = EVAL_DIR / "clips" / "thumbnails" / f"{clip_id}_source_thumb.jpg"
+    return thumbnail if thumbnail.exists() else None
+
+
 def _explanation_from_metrics(clip_id: str, metrics: dict[str, Any], lang: str) -> dict[str, Any]:
     summary = metrics.get("summary", {})
     team_a = float(summary.get("team_A", {}).get("hull_area", {}).get("mean", 0.0))
@@ -165,6 +170,8 @@ def _demo_job_from_metrics(clip_id: str, metrics: dict[str, Any]) -> dict[str, A
     meta = DEMO_META.get(clip_id, {})
     clip = _clip_entry(clip_id)
     source_video = _source_video_path(clip_id)
+    source_thumbnail = _source_thumbnail_path(clip_id)
+    fallback_thumbnail = source_thumbnail or _still_path(clip_id)
     event_count = len(metrics.get("events", []))
     return {
         "job_id": f"{DEMO_JOB_PREFIX}{clip_id}",
@@ -190,7 +197,8 @@ def _demo_job_from_metrics(clip_id: str, metrics: dict[str, Any]) -> dict[str, A
         "updated_at": "2026-05-12T00:00:00+00:00",
         "overlay_url": f"/api/demo/clips/{clip_id}/overlay",
         "source_video_url": _web_path(source_video),
-        "thumbnail_url": _web_path(_still_path(clip_id)) if _still_path(clip_id) else None,
+        "source_thumbnail_url": _web_path(source_thumbnail) if source_thumbnail else None,
+        "thumbnail_url": _web_path(fallback_thumbnail) if fallback_thumbnail else None,
         "frame_count": clip.get("frame_count"),
     }
 
@@ -229,3 +237,7 @@ def load_demo_result(clip_id: str, lang: str = "en") -> dict[str, Any]:
 def demo_overlay_path(clip_id: str) -> Path:
     clip = _clip_entry(clip_id)
     return Path(clip["overlay_path"])
+
+
+def demo_source_video_path(clip_id: str) -> Path:
+    return _source_video_path(clip_id)

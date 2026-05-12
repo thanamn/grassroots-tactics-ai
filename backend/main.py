@@ -11,6 +11,7 @@ Endpoints
     GET  /api/jobs               → list every job, newest first
     GET  /api/jobs/{id}          → status of one job
     GET  /api/jobs/{id}/result   → full metrics + explanation (only when done)
+    GET  /api/jobs/{id}/video    → the uploaded/original MP4
     GET  /api/jobs/{id}/overlay  → the rendered overlay MP4
     POST /api/jobs/{id}/explain  → re-run Gemini explainer for one language
     POST /api/jobs/{id}/chat     → free-form Q&A over the spacing metrics
@@ -42,6 +43,7 @@ from backend.jobs import (
 )
 from backend.demo_store import (
     demo_overlay_path,
+    demo_source_video_path,
     list_demo_clips,
     load_demo_clip,
     load_demo_result,
@@ -180,6 +182,14 @@ def job_overlay(job_id: str):
     return FileResponse(p, media_type="video/mp4")
 
 
+@app.get("/api/jobs/{job_id}/video")
+def job_video(job_id: str):
+    p = CLIPS_DIR / f"{job_id}.mp4"
+    if not p.exists():
+        raise HTTPException(404, "Original video not found")
+    return FileResponse(p, media_type="video/mp4")
+
+
 @app.post("/api/jobs/{job_id}/explain")
 def regenerate_explanation(job_id: str, lang: str = "en"):
     """Re-run the Gemini explainer for a single language.
@@ -308,6 +318,17 @@ def demo_overlay(clip_id: str):
     path = demo_overlay_path(clip_id)
     if not path.exists():
         raise HTTPException(404, "Demo overlay missing")
+    return FileResponse(path, media_type="video/mp4")
+
+
+@app.get("/api/demo/clips/{clip_id}/video")
+def demo_video(clip_id: str):
+    clip = load_demo_clip(clip_id)
+    if not clip:
+        raise HTTPException(404, "Demo clip not found")
+    path = demo_source_video_path(clip_id)
+    if not path.exists():
+        raise HTTPException(404, "Demo source video missing")
     return FileResponse(path, media_type="video/mp4")
 
 

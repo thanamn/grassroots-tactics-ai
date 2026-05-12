@@ -10,6 +10,16 @@ data/jobs/*
 
 # Evaluation data — keep only the curated annotation/manifests/demo bundle
 data/eval/*
+!data/eval/clips/
+data/eval/clips/*
+!data/eval/clips/thumbnails/
+data/eval/clips/thumbnails/*
+!data/eval/clips/thumbnails/psg_eval_01_source_thumb.jpg
+!data/eval/clips/thumbnails/psg_eval_02_source_thumb.jpg
+!data/eval/clips/thumbnails/psg_eval_03_source_thumb.jpg
+!data/eval/clips/psg_eval_01.mp4
+!data/eval/clips/psg_eval_02.mp4
+!data/eval/clips/psg_eval_03.mp4
 !data/eval/annotations/
 data/eval/annotations/*
 !data/eval/annotations/psg_annotation_v1.json
