@@ -31,6 +31,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import time
+from typing import Any, Callable
 
 import math
 
@@ -678,7 +680,8 @@ def run_tracking(video_path: Path, model_name: str | None = None,
                  confidence: float | None = None,
                  player_classes: list[int] | None = None,
                  ball_classes: list[int] | None = None,
-                 goalkeeper_classes: list[int] | None = None) -> dict:
+                 goalkeeper_classes: list[int] | None = None,
+                 progress_callback: Callable[[dict[str, Any]], None] | None = None) -> dict:
     """Detect + track persons across a video, return JSON-serialisable dict.
 
     Parameters
@@ -753,6 +756,8 @@ def run_tracking(video_path: Path, model_name: str | None = None,
 
     frames: list[dict] = []
     ball_raw: list[dict | None] = []   # one entry per processed frame, None = not seen
+    started = time.perf_counter()
+    total_processed_est = max(1, math.ceil(frame_count_meta / max(1, vid_stride))) if frame_count_meta else 1
 
     # When vid_stride > 1, ultralytics yields one result per *processed*
     # frame, so the loop index i maps back to the original video frame
@@ -806,6 +811,18 @@ def run_tracking(video_path: Path, model_name: str | None = None,
         # Print every 100 processed frames, not every 100 source frames.
         if i % 100 == 0:
             print(f"  frame {frame_idx}/{frame_count_meta} — {len(players)} players")
+            if progress_callback:
+                processed = i + 1
+                elapsed = max(0.001, time.perf_counter() - started)
+                actual_fps = processed / elapsed
+                remaining_processed = max(0, total_processed_est - processed)
+                progress_callback({
+                    "processed": processed,
+                    "total": total_processed_est,
+                    "progress": min(0.94, (processed / total_processed_est) * 0.94),
+                    "elapsed_s": elapsed,
+                    "estimated_remaining_s": (remaining_processed / max(0.001, actual_fps)) + max(3.0, elapsed * 0.06),
+                })
 
     # Interpolate short ball-detection gaps (e.g. brief occlusions) so
     # downstream possession metrics don't see artificial dropouts. Gaps longer
@@ -837,9 +854,27 @@ def run_tracking(video_path: Path, model_name: str | None = None,
     #      goalkeeper so they don't leak into the outfield assignment.
     #   3. Within-track gap interpolation fills the remaining holes for
     #      cases where the tracker emitted no bridge (long occlusion).
+    if progress_callback:
+        elapsed = max(0.001, time.perf_counter() - started)
+        progress_callback({
+            "processed": total_processed_est,
+            "total": total_processed_est,
+            "progress": 0.96,
+            "elapsed_s": elapsed,
+            "estimated_remaining_s": max(4.0, elapsed * 0.04),
+        })
     stitched_tracks = _stitch_broken_tracks(frames, fps)
     cls_corrections = _consolidate_track_cls(frames)
     player_gap_interpolations = _interpolate_player_gaps(frames, fps, vid_stride)
+    if progress_callback:
+        elapsed = max(0.001, time.perf_counter() - started)
+        progress_callback({
+            "processed": total_processed_est,
+            "total": total_processed_est,
+            "progress": 1.0,
+            "elapsed_s": elapsed,
+            "estimated_remaining_s": 0.0,
+        })
     print(
         f"[tracking] post-pass: stitched={stitched_tracks} "
         f"cls_corrected={cls_corrections} gap_interp={player_gap_interpolations}"

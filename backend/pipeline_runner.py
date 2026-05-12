@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -34,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from backend.jobs import load_job, update_job
+from backend.jobs import list_jobs, load_job, update_job
 from src.config import CACHE_DIR, CLIPS_DIR, TRACKING_DIR
 
 
@@ -89,31 +90,173 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _estimate_stage_seconds(duration_s: float, vid_stride: int) -> dict[str, float]:
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _seconds_since(value: str | None) -> float | None:
+    started = _parse_iso(value)
+    if not started:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - started).total_seconds())
+
+
+def _infer_total_seconds(job: dict) -> float | None:
+    actual = job.get("actual_total_s")
+    if isinstance(actual, (int, float)) and actual > 0:
+        return float(actual)
+    if job.get("status") != "done":
+        return None
+    start = _parse_iso(job.get("pipeline_started_at") or job.get("created_at"))
+    end = _parse_iso(job.get("updated_at"))
+    if not start or not end:
+        return None
+    seconds = (end - start).total_seconds()
+    return seconds if seconds > 0 else None
+
+
+def _baseline_stage_seconds(duration_s: float, vid_stride: int) -> dict[str, float]:
     tracked_seconds = duration_s / max(1, vid_stride)
     estimates = {
-        "tracking": max(18.0, tracked_seconds * 2.6),
-        "assign_teams": max(4.0, tracked_seconds * 0.22),
-        "metrics": max(2.0, tracked_seconds * 0.04),
-        "visualizer": max(10.0, duration_s * 0.65),
-        "explainer": 12.0,
+        "tracking": max(40.0, tracked_seconds * 6.5),
+        "assign_teams": max(8.0, tracked_seconds * 0.65),
+        "metrics": max(3.0, tracked_seconds * 0.08),
+        "visualizer": max(20.0, duration_s * 1.55),
+        "explainer": 18.0,
     }
     estimates["total"] = round(sum(estimates.values()), 1)
     return {k: round(v, 1) for k, v in estimates.items()}
 
 
+def _history_runtime_scale() -> tuple[float, int]:
+    ratios: list[float] = []
+    for job in list_jobs():
+        duration_s = job.get("probed_duration_s") or job.get("duration_s")
+        if not isinstance(duration_s, (int, float)) or duration_s <= 0:
+            continue
+        actual_s = _infer_total_seconds(job)
+        if not actual_s:
+            continue
+        baseline = _baseline_stage_seconds(float(duration_s), int(job.get("vid_stride") or 1))["total"]
+        if baseline <= 0:
+            continue
+        ratios.append(max(0.4, min(3.0, actual_s / baseline)))
+
+    if len(ratios) < 3:
+        return 1.0, len(ratios)
+
+    # Slightly conservative: local runs vary with thermals / model cache /
+    # explainer latency, and under-estimating feels worse than being early.
+    scale = statistics.median(ratios) * 1.10
+    return max(0.75, min(2.50, scale)), len(ratios)
+
+
+def _estimate_stage_seconds(duration_s: float, vid_stride: int) -> tuple[dict[str, float], dict[str, float | int | str]]:
+    estimates = _baseline_stage_seconds(duration_s, vid_stride)
+    scale, sample_count = _history_runtime_scale()
+    source = "local_history" if sample_count >= 3 else "duration_model"
+    if source == "local_history":
+        estimates = {
+            key: round(value * scale, 1)
+            for key, value in estimates.items()
+            if key != "total"
+        }
+        estimates["total"] = round(sum(estimates.values()), 1)
+
+    return estimates, {
+        "estimate_source": source,
+        "estimate_sample_count": sample_count,
+        "estimate_scale": round(scale, 3),
+    }
+
+
+def _stage_timings_with_current(job_id: str) -> dict[str, float]:
+    job = load_job(job_id) or {}
+    timings = dict(job.get("stage_timings") or {})
+    current = job.get("status")
+    elapsed = _seconds_since(job.get("stage_started_at"))
+    if current in STAGE_LABELS and elapsed is not None:
+        timings[current] = round(elapsed, 1)
+    return timings
+
+
 def _set_stage(job_id: str, idx: int) -> None:
+    timings = _stage_timings_with_current(job_id)
     update_job(job_id,
                status=STAGES[idx][0],
                stage_index=idx,
                stage_message=STAGES[idx][1],
-               stage_started_at=_now_iso())
+               stage_started_at=_now_iso(),
+               stage_progress=None,
+               stage_timings=timings)
+
+
+def _update_stage_progress(
+    job_id: str,
+    stage: str,
+    *,
+    progress: float,
+    elapsed_s: float,
+    estimated_remaining_s: float,
+    processed: int | None = None,
+    total: int | None = None,
+) -> None:
+    job = load_job(job_id) or {}
+    stage_estimates = dict(job.get("stage_estimates") or {})
+    stage_estimates[stage] = round(max(elapsed_s + estimated_remaining_s, elapsed_s), 1)
+
+    try:
+        stage_pos = STAGE_LABELS.index(stage)
+    except ValueError:
+        stage_pos = 0
+    future_s = sum(float(stage_estimates.get(name, 0) or 0) for name in STAGE_LABELS[stage_pos + 1:])
+    elapsed_total_s = _seconds_since(job.get("pipeline_started_at")) or 0.0
+    estimated_total_s = max(
+        elapsed_total_s + estimated_remaining_s + future_s,
+        elapsed_total_s + 1.0,
+    )
+
+    update_job(
+        job_id,
+        stage_progress={
+            "stage": stage,
+            "progress": round(max(0.0, min(1.0, progress)), 4),
+            "elapsed_s": round(elapsed_s, 1),
+            "estimated_remaining_s": round(max(0.0, estimated_remaining_s), 1),
+            "processed": processed,
+            "total": total,
+        },
+        stage_estimates=stage_estimates,
+        estimated_total_s=round(estimated_total_s, 1),
+    )
 
 
 def _stage_tracking(job_id: str, video_path: Path,
                     vid_stride: int = 1, model_name: str | None = None) -> Path:
     from src.tracking import run_tracking
-    data = run_tracking(video_path, model_name=model_name, vid_stride=vid_stride)
+
+    def progress_callback(info: dict) -> None:
+        _update_stage_progress(
+            job_id,
+            "tracking",
+            progress=float(info.get("progress", 0.0)),
+            elapsed_s=float(info.get("elapsed_s", 0.0)),
+            estimated_remaining_s=float(info.get("estimated_remaining_s", 0.0)),
+            processed=info.get("processed"),
+            total=info.get("total"),
+        )
+
+    data = run_tracking(
+        video_path,
+        model_name=model_name,
+        vid_stride=vid_stride,
+        progress_callback=progress_callback,
+    )
     out = TRACKING_DIR / f"{job_id}.json"
     out.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return out
@@ -136,7 +279,19 @@ def _stage_metrics(job_id: str, tracking_path: Path) -> Path:
 def _stage_visualizer(job_id: str, video_path: Path, tracking_path: Path) -> Path:
     from src.visualizer import render_overlay
     out = CACHE_DIR / f"{job_id}_overlay.mp4"
-    render_overlay(video_path, tracking_path, out)
+
+    def progress_callback(info: dict) -> None:
+        _update_stage_progress(
+            job_id,
+            "visualizer",
+            progress=float(info.get("progress", 0.0)),
+            elapsed_s=float(info.get("elapsed_s", 0.0)),
+            estimated_remaining_s=float(info.get("estimated_remaining_s", 0.0)),
+            processed=info.get("processed"),
+            total=info.get("total"),
+        )
+
+    render_overlay(video_path, tracking_path, out, progress_callback=progress_callback)
     return out
 
 
@@ -190,7 +345,7 @@ def run(job_id: str) -> None:
     # gets corrected later from the metrics step.
     probed_dur = _probe_duration(video_path)
     vid_stride, model_name = _auto_tune(probed_dur)
-    stage_estimates = _estimate_stage_seconds(probed_dur, vid_stride)
+    stage_estimates, estimate_meta = _estimate_stage_seconds(probed_dur, vid_stride)
     update_job(
         job_id,
         probed_duration_s=round(probed_dur, 1),
@@ -199,6 +354,7 @@ def run(job_id: str) -> None:
         pipeline_started_at=_now_iso(),
         estimated_total_s=stage_estimates["total"],
         stage_estimates={k: stage_estimates[k] for k in STAGE_LABELS},
+        **estimate_meta,
     )
     print(
         f"[runner] auto-tune: duration~{probed_dur:.1f}s "
@@ -233,10 +389,14 @@ def run(job_id: str) -> None:
         _set_stage(job_id, 4)
         _stage_explainer(job_id, metrics_path)
 
+        actual_total_s = _seconds_since((load_job(job_id) or {}).get("pipeline_started_at"))
         update_job(job_id,
                    status="done",
                    stage_index=len(STAGES),
-                   stage_message="Analysis complete.")
+                   stage_message="Analysis complete.",
+                   stage_progress=None,
+                   stage_timings=_stage_timings_with_current(job_id),
+                   actual_total_s=round(actual_total_s, 1) if actual_total_s is not None else None)
         print(f"[runner] Job {job_id} done.")
 
     except Exception as e:  # noqa: BLE001
@@ -244,7 +404,9 @@ def run(job_id: str) -> None:
         update_job(job_id,
                    status="error",
                    error=f"{type(e).__name__}: {e}",
-                   stage_message="Pipeline failed — see error.")
+                   stage_message="Pipeline failed — see error.",
+                   stage_progress=None,
+                   stage_timings=_stage_timings_with_current(job_id))
         sys.exit(1)
 
 

@@ -409,6 +409,7 @@ function parseIsoMs(value) {
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
 }
+const PIPELINE_STAGE_KEYS = ['tracking', 'assign_teams', 'metrics', 'visualizer', 'explainer'];
 async function apiGetJob(jobId) {
   const r = await fetch(
     isDemoJobId(jobId)
@@ -992,11 +993,24 @@ function ProgressScreen({ jobId, lang, onDone }) {
   const stageStartedMs = parseIsoMs(job.stage_started_at) || pipelineStartedMs;
   const elapsedTotalS = pipelineStartedMs ? (nowMs - pipelineStartedMs) / 1000 : 0;
   const elapsedStageS = stageStartedMs ? (nowMs - stageStartedMs) / 1000 : 0;
-  const estimatedTotalS = Number(job.estimated_total_s || 0);
-  const remainingS = estimatedTotalS > 0 ? Math.max(0, estimatedTotalS - elapsedTotalS) : 0;
   const stageEstimates = job.stage_estimates || {};
   const stageName = job.status;
   const stageExpectation = Number(stageEstimates[stageName] || 0);
+  const progressInfo = job.stage_progress?.stage === stageName ? job.stage_progress : null;
+  const progressRemainingS = Number(progressInfo?.estimated_remaining_s || 0);
+  const stagePos = Math.max(0, PIPELINE_STAGE_KEYS.indexOf(stageName));
+  const futureStageS = PIPELINE_STAGE_KEYS
+    .slice(stagePos + 1)
+    .reduce((sum, key) => sum + Number(stageEstimates[key] || 0), 0);
+  const rawEstimatedTotalS = Number(job.estimated_total_s || 0);
+  const dynamicEstimatedTotalS = Math.max(
+    rawEstimatedTotalS,
+    progressInfo ? elapsedTotalS + progressRemainingS + futureStageS : 0,
+  );
+  const estimatedTotalS = dynamicEstimatedTotalS;
+  const remainingS = estimatedTotalS > 0
+    ? Math.max(progressInfo ? progressRemainingS + futureStageS : 0, estimatedTotalS - elapsedTotalS)
+    : 0;
   const stageNotes = {
     tracking: [t.progressTracking1, t.progressTracking2, t.progressTracking3],
     assign_teams: [t.progressAssign1, t.progressAssign2],
@@ -1008,7 +1022,9 @@ function ProgressScreen({ jobId, lang, onDone }) {
   const noteIndex = notes.length > 0 ? Math.floor(elapsedStageS / 6) % notes.length : 0;
   const detailNote = notes[noteIndex] || '';
   const basePct = ((currentStep - 1) / (job.stage_total || 5)) * 100;
-  const withinStagePct = stageExpectation > 0 ? Math.min(1, elapsedStageS / stageExpectation) : 0;
+  const withinStagePct = progressInfo
+    ? Math.max(0, Math.min(1, Number(progressInfo.progress || 0)))
+    : (stageExpectation > 0 ? Math.min(1, elapsedStageS / stageExpectation) : 0);
   const pct = Math.max(basePct + withinStagePct * (100 / (job.stage_total || 5)), estimatedTotalS > 0 ? Math.min(97, (elapsedTotalS / estimatedTotalS) * 100) : 0);
 
   return (

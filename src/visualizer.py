@@ -12,7 +12,9 @@ import argparse
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -206,7 +208,12 @@ def _draw_team(frame: np.ndarray,
         cv2.circle(frame, (int(cx), int(cy)), 7, (255, 255, 255), 2)
 
 
-def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> None:
+def render_overlay(
+    video_path: Path,
+    tracking_path: Path,
+    output_path: Path,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> None:
     tracking = json.loads(tracking_path.read_text())
     frames_by_idx = {f["frame"]: f for f in tracking["frames"]}
 
@@ -222,6 +229,7 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
     fps = cap.get(cv2.CAP_PROP_FPS) or tracking.get("fps", 25)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or tracking.get("frame_count_meta") or 0)
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
@@ -232,6 +240,7 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
     # overlay on EVERY video frame, using the smoothing window to fill
     # in player positions from the nearest tracked entries.
     frame_idx = 0
+    started = time.perf_counter()
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -242,9 +251,29 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
             _draw_team(frame, data["outfield"], data["gks"], color, data["legacy_no_shape_flags"])
         writer.write(frame)
         frame_idx += 1
+        if progress_callback and (frame_idx == 1 or frame_idx % 100 == 0):
+            elapsed = max(0.001, time.perf_counter() - started)
+            actual_fps = frame_idx / elapsed
+            remaining_frames = max(0, total_frames - frame_idx) if total_frames else 0
+            progress_callback({
+                "processed": frame_idx,
+                "total": total_frames or None,
+                "progress": min(0.90, (frame_idx / max(1, total_frames)) * 0.90) if total_frames else 0.0,
+                "elapsed_s": elapsed,
+                "estimated_remaining_s": (remaining_frames / max(0.001, actual_fps)) + max(5.0, elapsed * 0.10),
+            })
 
     cap.release()
     writer.release()
+    if progress_callback:
+        elapsed = max(0.001, time.perf_counter() - started)
+        progress_callback({
+            "processed": frame_idx,
+            "total": total_frames or None,
+            "progress": 0.93,
+            "elapsed_s": elapsed,
+            "estimated_remaining_s": max(5.0, elapsed * 0.08),
+        })
 
     # mp4v is not browser-playable; re-encode to H.264 if ffmpeg is available.
     # Falls back to the static binary that imageio-ffmpeg ships, so the
@@ -265,6 +294,15 @@ def render_overlay(video_path: Path, tracking_path: Path, output_path: Path) -> 
             check=True, capture_output=True,
         )
         tmp.replace(output_path)
+        if progress_callback:
+            elapsed = max(0.001, time.perf_counter() - started)
+            progress_callback({
+                "processed": frame_idx,
+                "total": total_frames or None,
+                "progress": 1.0,
+                "elapsed_s": elapsed,
+                "estimated_remaining_s": 0.0,
+            })
 
     print(f"Wrote {output_path} — {frame_idx} frames")
 
