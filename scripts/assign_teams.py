@@ -94,6 +94,17 @@ TRACK_AVG_Y_FRAC_THRESH = 0.88
 # so brief role mis-flags on legit players don't drop them from the hull.
 ROLE_MAJORITY_THRESH = 0.50
 
+# Continuity pass -------------------------------------------------------
+# The tactical overlay should read like a team shape, not a detector debug
+# stream. These values intentionally prefer short, plausible continuity over
+# frame-by-frame disappearance when the detector drops a distant player.
+CONTINUITY_MAX_GAP_S = 6.0
+CONTINUITY_MAX_DIST_SCALE = 5.0
+CONTINUITY_MAX_PER_FRAME_PX = 60.0
+CONTINUITY_DUPLICATE_PX = 30.0
+TRANSIENT_MIN_TRACK_S = 0.28
+STABLE_SHAPE_TRACKS_PER_TEAM = 12
+
 
 def _grass_mask(frame_bgr: np.ndarray) -> np.ndarray:
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
@@ -201,6 +212,276 @@ def _kmeans_k(X: np.ndarray, k: int = 2, n_init: int = 10, max_iter: int = 100,
             best_labels  = labels.copy()
 
     return best_centres, best_labels  # type: ignore[return-value]
+
+
+def _shape_player(p: dict) -> bool:
+    return p.get("team") in ("A", "B") and p.get("include_in_shape") is not False
+
+
+def _point(p: dict) -> np.ndarray:
+    return np.array([float(p["x"]), float(p["y"])], dtype=float)
+
+
+def _bbox_diag(p: dict) -> float:
+    x1, y1, x2, y2 = (float(v) for v in p["bbox"])
+    return max(8.0, float(np.hypot(x2 - x1, y2 - y1)))
+
+
+def _track_observations(frames: list[dict]) -> dict[int, list[tuple[int, dict]]]:
+    obs: dict[int, list[tuple[int, dict]]] = {}
+    for frame in frames:
+        frame_no = int(frame["frame"])
+        for player in frame.get("players", []):
+            if _shape_player(player):
+                obs.setdefault(int(player["track_id"]), []).append((frame_no, player))
+    for track_obs in obs.values():
+        track_obs.sort(key=lambda item: item[0])
+    return obs
+
+
+def _tail_velocity(track_obs: list[tuple[int, dict]]) -> np.ndarray:
+    if len(track_obs) < 2:
+        return np.zeros(2, dtype=float)
+    tail = track_obs[-min(5, len(track_obs)):]
+    f0, p0 = tail[0]
+    f1, p1 = tail[-1]
+    return (_point(p1) - _point(p0)) / max(1, f1 - f0)
+
+
+def _resolve_parent(parent: dict[int, int], tid: int) -> int:
+    root = tid
+    while root in parent and parent[root] != root:
+        root = parent[root]
+    while tid in parent and parent[tid] != tid:
+        nxt = parent[tid]
+        parent[tid] = root
+        tid = nxt
+    return root
+
+
+def _merge_same_team_fragments(frames: list[dict], fps: float) -> int:
+    obs = _track_observations(frames)
+    track_ids = list(obs)
+    if len(track_ids) < 2:
+        return 0
+
+    max_gap_frames = min(90, int(round(fps * CONTINUITY_MAX_GAP_S)))
+    team_by_track = {tid: obs[tid][0][1].get("team") for tid in track_ids}
+    start = {tid: obs[tid][0][0] for tid in track_ids}
+    end = {tid: obs[tid][-1][0] for tid in track_ids}
+    parent: dict[int, int] = {}
+    used_predecessors: set[int] = set()
+    candidates: dict[int, list[tuple[int, float]]] = {}
+
+    for a_tid in track_ids:
+        a_obs = obs[a_tid]
+        a_last = a_obs[-1][1]
+        a_velocity = _tail_velocity(a_obs)
+        a_diag = _bbox_diag(a_last)
+        a_team = team_by_track.get(a_tid)
+        if a_team not in ("A", "B"):
+            continue
+        for b_tid in track_ids:
+            if a_tid == b_tid or team_by_track.get(b_tid) != a_team:
+                continue
+            gap = start[b_tid] - end[a_tid]
+            if gap <= 0 or gap > max_gap_frames:
+                continue
+            b_first = obs[b_tid][0][1]
+            predicted = _point(a_last) + a_velocity * gap
+            dist = float(np.linalg.norm(_point(b_first) - predicted))
+            avg_diag = (a_diag + _bbox_diag(b_first)) / 2.0
+            if dist > max(45.0, avg_diag * CONTINUITY_MAX_DIST_SCALE):
+                continue
+            if dist / max(1, gap) > CONTINUITY_MAX_PER_FRAME_PX:
+                continue
+            candidates.setdefault(b_tid, []).append((a_tid, dist + 2.0 * gap))
+
+    for b_tid in sorted(candidates, key=lambda tid: start[tid]):
+        ranked = sorted(candidates[b_tid], key=lambda item: item[1])
+        best: tuple[int, float] | None = None
+        runner_score: float | None = None
+        for a_tid, score in ranked:
+            if a_tid in used_predecessors:
+                continue
+            if best is None:
+                best = (a_tid, score)
+            else:
+                runner_score = score
+                break
+        if best is None:
+            continue
+        if runner_score is not None and runner_score < best[1] * 1.25:
+            continue
+        parent[b_tid] = _resolve_parent(parent, best[0])
+        used_predecessors.add(best[0])
+
+    if not parent:
+        return 0
+
+    for frame in frames:
+        for player in frame.get("players", []):
+            tid = int(player["track_id"])
+            merged_tid = _resolve_parent(parent, tid)
+            if merged_tid != tid:
+                player["track_id"] = merged_tid
+    return len(parent)
+
+
+def _interpolate_shape_player(prev: dict, nxt: dict, alpha: float) -> dict:
+    prev_box = np.asarray(prev["bbox"], dtype=float)
+    next_box = np.asarray(nxt["bbox"], dtype=float)
+    box = prev_box + (next_box - prev_box) * alpha
+    x1, y1, x2, y2 = box
+    player = dict(prev)
+    player.update({
+        "cls": int(prev.get("cls", nxt.get("cls", 2))),
+        "team": prev.get("team"),
+        "interpolated": True,
+        "interpolation": "team_continuity",
+        "x": float((x1 + x2) / 2.0),
+        "y": float(y2),
+        "bbox": [float(x1), float(y1), float(x2), float(y2)],
+        "on_pitch": True,
+        "include_in_shape": True,
+        "shape_role": "outfield",
+    })
+    return player
+
+
+def _has_duplicate_shape_player(players: list[dict], candidate: dict) -> bool:
+    cand_xy = _point(candidate)
+    cand_team = candidate.get("team")
+    cand_tid = int(candidate["track_id"])
+    for player in players:
+        if not _shape_player(player):
+            continue
+        if int(player["track_id"]) == cand_tid:
+            return True
+        if player.get("team") == cand_team and float(np.linalg.norm(_point(player) - cand_xy)) <= CONTINUITY_DUPLICATE_PX:
+            return True
+    return False
+
+
+def _fill_same_track_gaps(frames: list[dict], fps: float, vid_stride: int) -> int:
+    obs = _track_observations(frames)
+    if not obs:
+        return 0
+    frames_by_no = {int(frame["frame"]): frame for frame in frames}
+    step = max(1, int(vid_stride or 1))
+    max_gap_frames = min(90, int(round(fps * CONTINUITY_MAX_GAP_S)))
+    inserted = 0
+
+    for track_obs in obs.values():
+        for (f0, p0), (f1, p1) in zip(track_obs, track_obs[1:]):
+            gap = f1 - f0
+            if gap <= step or gap > max_gap_frames:
+                continue
+            if p0.get("team") != p1.get("team"):
+                continue
+            if float(np.linalg.norm(_point(p1) - _point(p0))) / max(1, gap) > CONTINUITY_MAX_PER_FRAME_PX:
+                continue
+            frame_no = f0 + step
+            while frame_no < f1:
+                frame = frames_by_no.get(frame_no)
+                if frame is not None:
+                    alpha = (frame_no - f0) / gap
+                    candidate = _interpolate_shape_player(p0, p1, alpha)
+                    players = frame.setdefault("players", [])
+                    if not _has_duplicate_shape_player(players, candidate):
+                        players.append(candidate)
+                        inserted += 1
+                frame_no += step
+
+    if inserted:
+        for frame in frames:
+            frame["players"].sort(key=lambda player: int(player["track_id"]))
+    return inserted
+
+
+def _suppress_transient_shape_tracks(frames: list[dict], fps: float, vid_stride: int) -> int:
+    obs = _track_observations(frames)
+    min_obs = max(4, int(round((fps / max(1, vid_stride)) * TRANSIENT_MIN_TRACK_S)))
+    transient_ids = {
+        tid for tid, track_obs in obs.items()
+        if len(track_obs) < min_obs and (track_obs[-1][0] - track_obs[0][0]) <= int(round(fps * TRANSIENT_MIN_TRACK_S))
+    }
+    if not transient_ids:
+        return 0
+    suppressed = 0
+    for frame in frames:
+        for player in frame.get("players", []):
+            if int(player.get("track_id", -1)) in transient_ids and _shape_player(player):
+                player["team"] = None
+                player["include_in_shape"] = False
+                player["on_pitch"] = False
+                player["shape_role"] = "transient"
+                suppressed += 1
+    return suppressed
+
+
+def _limit_shape_roster(frames: list[dict], max_tracks_per_team: int = STABLE_SHAPE_TRACKS_PER_TEAM) -> dict[str, int]:
+    if max_tracks_per_team <= 0:
+        return {
+            "kept_shape_tracks": 0,
+            "suppressed_roster_overflow_tracks": 0,
+            "suppressed_roster_overflow_players": 0,
+        }
+
+    obs = _track_observations(frames)
+    by_team: dict[str, list[tuple[int, tuple[int, int, int]]]] = {"A": [], "B": []}
+    for tid, track_obs in obs.items():
+        if not track_obs:
+            continue
+        team = track_obs[0][1].get("team")
+        if team not in by_team:
+            continue
+        span = track_obs[-1][0] - track_obs[0][0] + 1
+        measured = sum(1 for _, player in track_obs if not player.get("interpolated"))
+        by_team[team].append((tid, (span, measured, len(track_obs))))
+
+    keep_ids: set[int] = set()
+    overflow_ids: set[int] = set()
+    for team_tracks in by_team.values():
+        ranked = sorted(team_tracks, key=lambda item: item[1], reverse=True)
+        keep_ids.update(tid for tid, _ in ranked[:max_tracks_per_team])
+        overflow_ids.update(tid for tid, _ in ranked[max_tracks_per_team:])
+
+    if not overflow_ids:
+        return {
+            "kept_shape_tracks": len(keep_ids),
+            "suppressed_roster_overflow_tracks": 0,
+            "suppressed_roster_overflow_players": 0,
+        }
+
+    suppressed_players = 0
+    for frame in frames:
+        for player in frame.get("players", []):
+            tid = int(player.get("track_id", -1))
+            if tid in overflow_ids and _shape_player(player):
+                player["include_in_shape"] = False
+                player["on_pitch"] = True
+                player["shape_role"] = "roster_overflow"
+                suppressed_players += 1
+
+    return {
+        "kept_shape_tracks": len(keep_ids),
+        "suppressed_roster_overflow_tracks": len(overflow_ids),
+        "suppressed_roster_overflow_players": suppressed_players,
+    }
+
+
+def smooth_team_continuity(frames: list[dict], fps: float, vid_stride: int = 1) -> dict[str, int]:
+    merged = _merge_same_team_fragments(frames, fps)
+    inserted = _fill_same_track_gaps(frames, fps, vid_stride)
+    suppressed = _suppress_transient_shape_tracks(frames, fps, vid_stride)
+    roster_stats = _limit_shape_roster(frames)
+    return {
+        "merged_track_fragments": merged,
+        "inserted_gap_players": inserted,
+        "suppressed_transient_players": suppressed,
+        **roster_stats,
+    }
 
 
 def assign_teams(tracking_path: Path, video_path: Path) -> None:
@@ -494,10 +775,10 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
 
     if sticky_sideline_tracks:
         print(f"  Sticky-sideline override on {sticky_sideline_tracks} tracks "
-              f"(≥{int(NON_PLAYER_STICKY_THRESH*100)}% non-player frames)")
+              f"(>={int(NON_PLAYER_STICKY_THRESH*100)}% non-player frames)")
     if sticky_y_frac_tracks:
         print(f"  Y-frac override on {sticky_y_frac_tracks} tracks "
-              f"(avg bottom-edge ≥ {TRACK_AVG_Y_FRAC_THRESH:.2f} of frame height)")
+              f"(avg bottom-edge >= {TRACK_AVG_Y_FRAC_THRESH:.2f} of frame height)")
     print(f"  Assigned {assigned}/{total} players ({100*assigned//total}%)")
     if inherited:
         print(f"  Filled {inherited} short team-label gaps from track majority")
@@ -509,6 +790,22 @@ def assign_teams(tracking_path: Path, video_path: Path) -> None:
         print(f"  Excluded {rejected_goalkeeper} goalkeeper detections from hulls")
     if rejected_sideline:
         print(f"  Excluded {rejected_sideline} likely sideline/off-pitch detections")
+
+    continuity_stats = smooth_team_continuity(
+        frames,
+        fps=float(tracking.get("fps", 25.0)),
+        vid_stride=int(tracking.get("vid_stride", 1) or 1),
+    )
+    tracking["team_continuity"] = continuity_stats
+    if any(continuity_stats.values()):
+        print(
+            "  Team continuity:"
+            f" merged={continuity_stats['merged_track_fragments']}"
+            f" inserted={continuity_stats['inserted_gap_players']}"
+            f" suppressed={continuity_stats['suppressed_transient_players']}"
+            f" kept_shape_tracks={continuity_stats['kept_shape_tracks']}"
+            f" roster_overflow={continuity_stats['suppressed_roster_overflow_players']}"
+        )
 
     tracking_path.write_text(
         json.dumps(tracking, indent=2, ensure_ascii=False), encoding="utf-8"
