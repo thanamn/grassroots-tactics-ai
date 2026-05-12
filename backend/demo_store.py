@@ -17,19 +17,19 @@ DEMO_JOB_PREFIX = "demo:"
 
 DEMO_META = {
     "psg_eval_01": {
-        "title": "Demo Clip 01",
-        "subtitle_en": "Precomputed PSG spacing review clip",
-        "subtitle_th": "คลิปเดโมสำเร็จรูปสำหรับรีวิวการยืนตำแหน่ง",
+        "title": "PSG Clip 01",
+        "subtitle_en": "PSG spacing review clip",
+        "subtitle_th": "คลิปรีวิวการยืนตำแหน่งของ PSG",
     },
     "psg_eval_02": {
-        "title": "Demo Clip 02",
-        "subtitle_en": "Precomputed PSG spacing review clip",
-        "subtitle_th": "คลิปเดโมสำเร็จรูปสำหรับรีวิวการยืนตำแหน่ง",
+        "title": "PSG Clip 02",
+        "subtitle_en": "PSG spacing review clip",
+        "subtitle_th": "คลิปรีวิวการยืนตำแหน่งของ PSG",
     },
     "psg_eval_03": {
-        "title": "Demo Clip 03",
-        "subtitle_en": "Precomputed PSG spacing review clip",
-        "subtitle_th": "คลิปเดโมสำเร็จรูปสำหรับรีวิวการยืนตำแหน่ง",
+        "title": "PSG Clip 03",
+        "subtitle_en": "PSG spacing review clip",
+        "subtitle_th": "คลิปรีวิวการยืนตำแหน่งของ PSG",
     },
 }
 
@@ -72,6 +72,11 @@ def _still_path(clip_id: str) -> Path | None:
     stills_dir = _demo_run_dir() / "stills"
     candidates = sorted(stills_dir.glob(f"{clip_id}_overlay_f*.png"))
     return candidates[0] if candidates else None
+
+
+def _source_video_path(clip_id: str) -> Path:
+    clip = _clip_entry(clip_id)
+    return Path(clip["trimmed_video_path"])
 
 
 def _explanation_from_metrics(clip_id: str, metrics: dict[str, Any], lang: str) -> dict[str, Any]:
@@ -159,6 +164,7 @@ def _explanation_from_metrics(clip_id: str, metrics: dict[str, Any], lang: str) 
 def _demo_job_from_metrics(clip_id: str, metrics: dict[str, Any]) -> dict[str, Any]:
     meta = DEMO_META.get(clip_id, {})
     clip = _clip_entry(clip_id)
+    source_video = _source_video_path(clip_id)
     event_count = len(metrics.get("events", []))
     return {
         "job_id": f"{DEMO_JOB_PREFIX}{clip_id}",
@@ -169,7 +175,7 @@ def _demo_job_from_metrics(clip_id: str, metrics: dict[str, Any]) -> dict[str, A
         "opponent": meta.get("title", clip_id),
         "notes": meta.get("subtitle_en"),
         "language": "en",
-        "video_size": None,
+        "video_size": source_video.stat().st_size if source_video.exists() else None,
         "duration_s": float(metrics.get("duration_s", 0.0)),
         "fps": float(metrics.get("fps", 25.0)),
         "status": "done",
@@ -183,6 +189,7 @@ def _demo_job_from_metrics(clip_id: str, metrics: dict[str, Any]) -> dict[str, A
         "created_at": "2026-05-12T00:00:00+00:00",
         "updated_at": "2026-05-12T00:00:00+00:00",
         "overlay_url": f"/api/demo/clips/{clip_id}/overlay",
+        "source_video_url": _web_path(source_video),
         "thumbnail_url": _web_path(_still_path(clip_id)) if _still_path(clip_id) else None,
         "frame_count": clip.get("frame_count"),
     }

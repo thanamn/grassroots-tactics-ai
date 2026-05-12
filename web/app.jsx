@@ -130,17 +130,25 @@ const T = {
     demoSectionSub: 'These three clips are already processed with the refined annotated-base overlay.',
     demoOpen: 'Open demo clip',
     demoReady: 'Ready now',
-    demoBadge: 'Precomputed demo',
     demoTry: 'Try demo mode',
-    demoFlow: 'Demo walkthrough',
-    demoPickTitle: 'Choose a demo clip',
-    demoPickSub: 'Follow the normal product flow with a polished precomputed example instead of waiting for live processing.',
-    demoSelected: 'Selected demo clip',
-    demoNoUpload: 'No real upload is needed. We will simulate the same product journey using a precomputed analysis package.',
-    demoContinue: 'Use this demo clip →',
+    demoPickTitle: 'Choose a clip',
+    demoPickSub: 'Pick one of the prepared clips to walk through the normal analysis flow.',
+    demoContinue: 'Use this clip →',
     demoBackToUpload: 'Use my own video instead',
-    demoProcessing: 'Preparing demo analysis',
-    demoDone: 'Demo ready!',
+    elapsed: 'Elapsed',
+    remaining: 'Est. remaining',
+    totalEstimate: 'Approx total',
+    progressTracking1: 'Tracking players across the clip.',
+    progressTracking2: 'This is usually the longest step on CPU.',
+    progressTracking3: 'Far-away players can take extra time to stabilise.',
+    progressAssign1: 'Separating the two teams by jersey colours.',
+    progressAssign2: 'Filtering sideline and outlier detections.',
+    progressMetrics1: 'Measuring hull area, centroid distance, and spread.',
+    progressMetrics2: 'Detecting sudden shape-change moments.',
+    progressVisual1: 'Rendering the tactical overlay video.',
+    progressVisual2: 'Drawing team shapes and key links frame by frame.',
+    progressExplain1: 'Writing the coach-facing tactical explanation.',
+    progressExplain2: 'Preparing the final analysis screen.',
   },
   th: {
     eyebrow: 'AI วิเคราะห์การยืนตำแหน่งของทีม',
@@ -235,17 +243,25 @@ const T = {
     demoSectionSub: 'ทั้ง 3 คลิปนี้ผ่านการประมวลผลและใช้ overlay แบบ refined annotated-base เรียบร้อยแล้ว',
     demoOpen: 'เปิดคลิปเดโม',
     demoReady: 'พร้อมดู',
-    demoBadge: 'เดโมสำเร็จรูป',
     demoTry: 'ลองโหมดเดโม',
-    demoFlow: 'เส้นทางเดโม',
-    demoPickTitle: 'เลือกคลิปเดโม',
-    demoPickSub: 'ลองตาม flow จริงของระบบได้เลย โดยใช้ตัวอย่างที่ประมวลผลเสร็จแล้วแทนการรอ pipeline จริง',
-    demoSelected: 'คลิปเดโมที่เลือก',
-    demoNoUpload: 'ไม่ต้องอัปโหลดจริง ระบบจะจำลองเส้นทางการใช้งานเดียวกันด้วยผลวิเคราะห์ที่เตรียมไว้แล้ว',
-    demoContinue: 'ใช้คลิปเดโมนี้ →',
+    demoPickTitle: 'เลือกคลิป',
+    demoPickSub: 'เลือกคลิปตัวอย่างเพื่อเดินตาม flow วิเคราะห์แบบเดียวกับการใช้งานปกติ',
+    demoContinue: 'ใช้คลิปนี้ →',
     demoBackToUpload: 'ใช้วิดีโอของฉันเองแทน',
-    demoProcessing: 'กำลังเตรียมเดโม',
-    demoDone: 'เดโมพร้อมแล้ว!',
+    elapsed: 'เวลาที่ผ่านไป',
+    remaining: 'คาดว่าเหลือ',
+    totalEstimate: 'เวลารวมโดยประมาณ',
+    progressTracking1: 'กำลังติดตามผู้เล่นตลอดทั้งคลิป',
+    progressTracking2: 'ขั้นตอนนี้มักใช้เวลานานที่สุดเมื่อรันบน CPU',
+    progressTracking3: 'ผู้เล่นที่อยู่ไกลหรือบังกันอาจทำให้ใช้เวลานานขึ้น',
+    progressAssign1: 'กำลังแยกสองทีมด้วยสีเสื้อ',
+    progressAssign2: 'กำลังคัด detection ที่เป็นข้างสนามหรือเป็น outlier ออก',
+    progressMetrics1: 'กำลังคำนวณ hull area, centroid distance และ spread',
+    progressMetrics2: 'กำลังหาช่วงที่รูปทรงทีมเปลี่ยนชัดเจน',
+    progressVisual1: 'กำลังเรนเดอร์วิดีโอ overlay เชิงแท็กติก',
+    progressVisual2: 'กำลังวาดรูปทรงทีมและเส้นเชื่อมในแต่ละเฟรม',
+    progressExplain1: 'กำลังเขียนคำอธิบายเชิงโค้ช',
+    progressExplain2: 'กำลังเตรียมหน้าผลวิเคราะห์สุดท้าย',
   },
 };
 
@@ -371,6 +387,17 @@ function overlayUrlForJob(jobId) {
     ? `/api/demo/clips/${demoClipId(jobId)}/overlay`
     : `/api/jobs/${jobId}/overlay`;
 }
+function formatDurationCompact(totalSeconds) {
+  const secs = Math.max(0, Math.round(totalSeconds || 0));
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}:${String(rem).padStart(2, '0')}`;
+}
+function parseIsoMs(value) {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
 async function apiGetJob(jobId) {
   const r = await fetch(
     isDemoJobId(jobId)
@@ -442,6 +469,11 @@ function Dashboard({ setScreen, lang }) {
     setScreen({ name: 'onboarding', preselected: file });
   };
 
+  const recentItems = [...demos, ...jobs].sort((a, b) => {
+    const ta = Date.parse(a.created_at || 0) || 0;
+    const tb = Date.parse(b.created_at || 0) || 0;
+    return tb - ta;
+  });
   const totalSeconds = jobs.reduce((s, j) => s + (j.duration_s || 0), 0);
   const totalEvents = jobs.reduce((s, j) => s + (j.events_count || 0), 0);
   const latest = jobs.find((j) => j.status === 'done');
@@ -539,27 +571,6 @@ function Dashboard({ setScreen, lang }) {
           />
         </div>
 
-        {demos.length > 0 && (
-          <div id="demo-section" style={{ marginBottom: 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, letterSpacing: '0.02em' }}>{t.demoSection}</h2>
-              <div style={{ flex: 1, height: 1, background: C.border }} />
-            </div>
-            <div style={{ marginBottom: 14, fontSize: 13, color: C.gray, lineHeight: 1.6 }}>{t.demoSectionSub}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-              {demos.map((demo) => (
-                <DemoCard
-                  key={demo.job_id}
-                  demo={demo}
-                  lang={lang}
-                  t={t}
-                  onOpen={() => setScreen({ name: 'onboarding', demoMode: true, demoClipId: demo.demo_id })}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Recent */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
           <h2 style={{ fontSize: 18, fontWeight: 700, letterSpacing: '0.02em' }}>{t.recent}</h2>
@@ -567,17 +578,17 @@ function Dashboard({ setScreen, lang }) {
         </div>
         {loading ? (
           <div style={{ color: C.gray, padding: 12 }}>…</div>
-        ) : jobs.length === 0 ? (
+        ) : recentItems.length === 0 ? (
           <div className="card" style={{ padding: 18, color: C.gray, fontSize: 14 }}>{t.noRecent}</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 40 }}>
-            {jobs.map((j, i) => (
+            {recentItems.map((j, i) => (
               <RecentRow key={j.job_id} job={j} delay={i * 60} t={t}
                          onOpen={() => {
                            if (j.status === 'done') setScreen({ name: 'analysis', jobId: j.job_id });
                            else setScreen({ name: 'progress', jobId: j.job_id });
                          }}
-                         onDelete={async () => {
+                         onDelete={j.is_demo ? null : async () => {
                            if (!confirm(t.confirmDelete)) return;
                            await apiDeleteJob(j.job_id);
                            refresh();
@@ -587,71 +598,6 @@ function Dashboard({ setScreen, lang }) {
         )}
       </div>
     </div>
-  );
-}
-
-function DemoCard({ demo, lang, t, onOpen }) {
-  const summary = demo.summary || {};
-  const teamA = summary.team_A?.hull_area?.mean || 0;
-  const teamB = summary.team_B?.hull_area?.mean || 0;
-  const gap = summary.centroid_distance?.mean || 0;
-  return (
-    <button
-      className="card slide-up"
-      onClick={onOpen}
-      style={{ padding: 0, overflow: 'hidden', textAlign: 'left', cursor: 'pointer', background: C.card }}
-    >
-      <div style={{ position: 'relative', aspectRatio: '16 / 9', background: '#08121c' }}>
-        {demo.thumbnail_url ? (
-          <img
-            src={demo.thumbnail_url}
-            alt={demo.title}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        ) : null}
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: 'linear-gradient(180deg, rgba(13,27,42,0.08) 0%, rgba(13,27,42,0.75) 100%)',
-        }} />
-        <div style={{
-          position: 'absolute', top: 12, left: 12,
-          fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-          textTransform: 'uppercase', color: C.bg, background: C.green,
-          padding: '5px 10px', borderRadius: 999,
-        }}>
-          {t.demoBadge}
-        </div>
-        <div style={{ position: 'absolute', right: 12, bottom: 12, display: 'flex', gap: 8 }}>
-          <span style={{ fontSize: 11, color: C.white, background: 'rgba(13,27,42,0.8)', padding: '4px 8px', borderRadius: 999 }}>
-            {(demo.duration_s || 0).toFixed(1)}s
-          </span>
-          <span style={{ fontSize: 11, color: C.yellow, background: 'rgba(13,27,42,0.8)', padding: '4px 8px', borderRadius: 999 }}>
-            {demo.events_count || 0} events
-          </span>
-        </div>
-      </div>
-      <div style={{ padding: 16 }}>
-        <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 20, fontWeight: 700, color: C.white, marginBottom: 6 }}>
-          {demo.title || demo.opponent || demo.filename}
-        </div>
-        <div style={{ fontSize: 13, color: C.gray, lineHeight: 1.6, marginBottom: 14 }}>
-          {lang === 'th' ? demo.subtitle_th : demo.subtitle_en}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
-          <MiniStat label={t.teamALabel} value={`${(teamA / 1000).toFixed(0)}k`} color={C.teamA} />
-          <MiniStat label={t.teamBLabel} value={`${(teamB / 1000).toFixed(0)}k`} color={C.teamB} />
-          <MiniStat label={t.gap} value={`${gap.toFixed(0)}px`} color={C.green} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          <span style={{ fontSize: 12, color: C.green, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            {t.demoReady}
-          </span>
-          <span className="btn-primary" style={{ padding: '10px 14px', fontSize: 13 }}>
-            {t.demoOpen}
-          </span>
-        </div>
-      </div>
-    </button>
   );
 }
 
@@ -685,10 +631,12 @@ function RecentRow({ job, delay, t, onOpen, onDelete }) {
         {job.status !== 'done' && job.status !== 'error' && <Pulse size={6} color={statusColor} />}
         {job.status}
       </div>
-      <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: 12 }}
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}>
-        {t.delete}
-      </button>
+      {onDelete ? (
+        <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: 12 }}
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+          {t.delete}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -837,12 +785,6 @@ function Onboarding({ setScreen, lang, preselected, demoMode = false, demoClipId
 
         {step === 1 && demoMode && (
           <div className="slide-up card" style={{ padding: 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <Pulse />
-              <span style={{ fontSize: 12, color: C.green, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-                {t.demoFlow}
-              </span>
-            </div>
             <h2 style={{ fontSize: 26, fontWeight: 700, marginBottom: 6 }}>{t.demoPickTitle}</h2>
             <p style={{ color: C.gray, fontSize: 14, marginBottom: 24, lineHeight: 1.6 }}>{t.demoPickSub}</p>
             <div style={{ display: 'grid', gap: 14 }}>
@@ -866,29 +808,27 @@ function Onboarding({ setScreen, lang, preselected, demoMode = false, demoClipId
                     }}
                   >
                     <div style={{ position: 'relative', minHeight: 112, background: '#09131f' }}>
-                      {demo.thumbnail_url ? (
-                        <img src={demo.thumbnail_url} alt={demo.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                      ) : null}
-                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(13,27,42,0.08) 0%, rgba(13,27,42,0.72) 100%)' }} />
-                      <div style={{
-                        position: 'absolute', top: 10, left: 10,
-                        fontSize: 10, fontWeight: 700, letterSpacing: '0.08em',
-                        textTransform: 'uppercase', color: C.bg, background: C.green,
-                        padding: '4px 8px', borderRadius: 999,
-                      }}>
-                        {t.demoBadge}
-                      </div>
+                      {demo.source_video_url ? (
+                        <video
+                          src={demo.source_video_url}
+                          autoPlay
+                          muted
+                          loop
+                          playsInline
+                          preload="metadata"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', background: '#0a1826' }} />
+                      )}
+                      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(13,27,42,0.05) 0%, rgba(13,27,42,0.55) 100%)' }} />
                     </div>
                     <div style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
                         <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 22, fontWeight: 700, color: C.white }}>
                           {demo.title}
                         </div>
-                        {active && (
-                          <span style={{ color: C.green, fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                            {t.demoReady}
-                          </span>
-                        )}
+                        {active ? <Pulse size={8} /> : null}
                       </div>
                       <div style={{ color: C.gray, fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
                         {lang === 'th' ? demo.subtitle_th : demo.subtitle_en}
@@ -922,19 +862,8 @@ function Onboarding({ setScreen, lang, preselected, demoMode = false, demoClipId
               📁 {file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB
             </div>}
             {demoMode && selectedDemo && (
-              <div style={{ marginBottom: 18, padding: '12px 14px', background: C.bg, borderRadius: 10, border: `1px solid ${C.border}` }}>
-                <div style={{ fontSize: 11, color: C.green, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>
-                  {t.demoSelected}
-                </div>
-                <div style={{ fontFamily: 'Rajdhani,sans-serif', fontSize: 20, fontWeight: 700, color: C.white, marginBottom: 4 }}>
-                  {selectedDemo.title}
-                </div>
-                <div style={{ fontSize: 13, color: C.grayLight, lineHeight: 1.6 }}>
-                  {lang === 'th' ? selectedDemo.subtitle_th : selectedDemo.subtitle_en}
-                </div>
-                <div style={{ marginTop: 8, fontSize: 12, color: C.gray }}>
-                  {t.demoNoUpload}
-                </div>
+              <div style={{ marginBottom: 18, fontSize: 13, color: C.grayLight, fontFamily: 'monospace', padding: '8px 12px', background: C.bg, borderRadius: 8, border: `1px solid ${C.border}` }}>
+                📁 {selectedDemo.filename} · {((selectedDemo.video_size || 0) / 1024 / 1024).toFixed(1)} MB
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -1005,6 +934,12 @@ function Onboarding({ setScreen, lang, preselected, demoMode = false, demoClipId
 function ProgressScreen({ jobId, lang, onDone }) {
   const t = T[lang];
   const [job, setJob] = useState(null);
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let stopped = false;
@@ -1033,7 +968,47 @@ function ProgressScreen({ jobId, lang, onDone }) {
     );
   }
 
-  const pct = Math.round((job.stage_index / (job.stage_total || 5)) * 100);
+  const currentStep = Math.min(job.stage_total || 5, job.status === 'done' ? (job.stage_total || 5) : ((job.stage_index || 0) + 1));
+  const pipelineStartedMs = parseIsoMs(job.pipeline_started_at || job.created_at);
+  const stageStartedMs = parseIsoMs(job.stage_started_at) || pipelineStartedMs;
+  const elapsedTotalS = pipelineStartedMs ? (nowMs - pipelineStartedMs) / 1000 : 0;
+  const elapsedStageS = stageStartedMs ? (nowMs - stageStartedMs) / 1000 : 0;
+  const estimatedTotalS = Number(job.estimated_total_s || 0);
+  const remainingS = estimatedTotalS > 0 ? Math.max(0, estimatedTotalS - elapsedTotalS) : 0;
+  const stageEstimates = job.stage_estimates || {};
+  const stageName = job.status;
+  const stageExpectation = Number(stageEstimates[stageName] || 0);
+  const stageNotes = {
+    tracking: [t.progressTracking1, t.progressTracking2, t.progressTracking3],
+    assign_teams: [t.progressAssign1, t.progressAssign2],
+    metrics: [t.progressMetrics1, t.progressMetrics2],
+    visualizer: [t.progressVisual1, t.progressVisual2],
+    explainer: [t.progressExplain1, t.progressExplain2],
+  };
+  const notes = stageNotes[stageName] || [];
+  const noteIndex = notes.length > 0 ? Math.floor(elapsedStageS / 6) % notes.length : 0;
+  const detailNote = notes[noteIndex] || '';
+  const basePct = ((currentStep - 1) / (job.stage_total || 5)) * 100;
+  const withinStagePct = stageExpectation > 0 ? Math.min(1, elapsedStageS / stageExpectation) : 0;
+  const pct = Math.max(basePct + withinStagePct * (100 / (job.stage_total || 5)), estimatedTotalS > 0 ? Math.min(97, (elapsedTotalS / estimatedTotalS) * 100) : 0);
+
+  return (
+    <ProgressScreenBody
+      t={t}
+      job={job}
+      currentStep={currentStep}
+      progressPct={pct}
+      detailNote={detailNote}
+      elapsedTotalS={elapsedTotalS}
+      remainingS={remainingS}
+      estimatedTotalS={estimatedTotalS}
+    />
+  );
+}
+
+function ProgressScreenBody({
+  t, job, currentStep, progressPct, detailNote, elapsedTotalS, remainingS, estimatedTotalS,
+}) {
   return (
     <div className="card slide-up" style={{ padding: 48, textAlign: 'center' }}>
       <div style={{ position: 'relative', width: 80, height: 80, margin: '0 auto 28px' }}>
@@ -1043,6 +1018,9 @@ function ProgressScreen({ jobId, lang, onDone }) {
       </div>
       <h2 style={{ fontSize: 22, fontWeight: 700, color: C.green, marginBottom: 6 }}>{t.analysing}</h2>
       <p style={{ color: C.grayLight, fontSize: 14, marginBottom: 8, minHeight: 20 }}>{job.stage_message}</p>
+      {detailNote ? (
+        <p style={{ color: C.gray, fontSize: 13, marginBottom: 12, minHeight: 18 }}>{detailNote}</p>
+      ) : null}
       {job.vid_stride > 1 && (
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
                       padding: '4px 12px', borderRadius: 16,
@@ -1057,11 +1035,16 @@ function ProgressScreen({ jobId, lang, onDone }) {
         </div>
       )}
       <p style={{ color: C.gray, fontSize: 12, marginBottom: 24 }}>{t.cpuNote}</p>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 18, flexWrap: 'wrap', marginBottom: 18, fontSize: 12, color: C.grayLight }}>
+        <span>{t.elapsed}: <strong style={{ color: C.white, fontFamily: 'monospace' }}>{formatDurationCompact(elapsedTotalS)}</strong></span>
+        {estimatedTotalS > 0 ? <span>{t.remaining}: <strong style={{ color: C.white, fontFamily: 'monospace' }}>{formatDurationCompact(remainingS)}</strong></span> : null}
+        {estimatedTotalS > 0 ? <span>{t.totalEstimate}: <strong style={{ color: C.white, fontFamily: 'monospace' }}>{formatDurationCompact(estimatedTotalS)}</strong></span> : null}
+      </div>
       <div style={{ height: 4, background: C.border, borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{ height: '100%', background: `linear-gradient(90deg, ${C.green}, #00D4FF)`, borderRadius: 2, width: `${pct}%`, transition: 'width 0.6s ease' }} />
+        <div style={{ height: '100%', background: `linear-gradient(90deg, ${C.green}, #00D4FF)`, borderRadius: 2, width: `${Math.min(99, Math.max(6, progressPct)).toFixed(1)}%`, transition: 'width 0.6s ease' }} />
       </div>
       <div style={{ marginTop: 8, fontSize: 11, color: C.gray, fontFamily: 'monospace' }}>
-        Step {job.stage_index} of {job.stage_total}
+        Step {currentStep} of {job.stage_total}
       </div>
     </div>
   );
@@ -1070,13 +1053,20 @@ function ProgressScreen({ jobId, lang, onDone }) {
 function DemoProgressScreen({ demo, lang, onDone }) {
   const t = T[lang];
   const stages = [
-    lang === 'th' ? 'กำลังโหลดคลิปเดโมเข้าระบบ…' : 'Loading demo clip into the pipeline…',
-    lang === 'th' ? 'กำลังอ่าน refined tracking ที่เตรียมไว้…' : 'Reading precomputed refined tracking…',
-    lang === 'th' ? 'กำลังคำนวณ spread / compactness metrics…' : 'Computing spread / compactness metrics…',
-    lang === 'th' ? 'กำลังเตรียม overlay และจังหวะสำคัญ…' : 'Preparing the overlay and key moments…',
-    lang === 'th' ? 'กำลังเปิดหน้าวิเคราะห์สำหรับเดโม…' : 'Opening the final analysis view…',
+    { key: 'tracking', message: 'Spotting the players…' },
+    { key: 'assign_teams', message: 'Mapping team colours…' },
+    { key: 'metrics', message: 'Computing spacing metrics…' },
+    { key: 'visualizer', message: 'Rendering tactical overlay…' },
+    { key: 'explainer', message: 'Generating coaching insights…' },
   ];
   const [stageIndex, setStageIndex] = useState(1);
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [startMs] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1101,32 +1091,38 @@ function DemoProgressScreen({ demo, lang, onDone }) {
     };
   }, [onDone, stages.length]);
 
-  const pct = Math.round((stageIndex / stages.length) * 100);
-  const title = demo.title || demo.opponent || demo.filename;
+  const current = stages[Math.max(0, stageIndex - 1)] || stages[0];
+  const stageNotes = {
+    tracking: [t.progressTracking1, t.progressTracking2, t.progressTracking3],
+    assign_teams: [t.progressAssign1, t.progressAssign2],
+    metrics: [t.progressMetrics1, t.progressMetrics2],
+    visualizer: [t.progressVisual1, t.progressVisual2],
+    explainer: [t.progressExplain1, t.progressExplain2],
+  };
+  const detailNote = (stageNotes[current.key] || [])[Math.floor(((nowMs / 1000) % 12) / 6)] || '';
+  const elapsedS = (nowMs - startMs) / 1000;
+  const estimatedTotalS = 6.7;
+  const remainingS = Math.max(0, estimatedTotalS - elapsedS);
+  const pct = Math.min(99, Math.max((stageIndex / stages.length) * 100, (elapsedS / estimatedTotalS) * 100));
+  const fakeJob = {
+    ...demo,
+    status: current.key,
+    stage_message: current.message,
+    stage_index: stageIndex - 1,
+    stage_total: stages.length,
+    estimated_total_s: estimatedTotalS,
+  };
   return (
-    <div className="card slide-up" style={{ padding: 48, textAlign: 'center' }}>
-      <div style={{ position: 'relative', width: 80, height: 80, margin: '0 auto 28px' }}>
-        <div style={{ width: 80, height: 80, borderRadius: '50%', border: `3px solid ${C.green}33`, animation: 'spin 2s linear infinite', position: 'absolute' }} />
-        <div style={{ width: 80, height: 80, borderRadius: '50%', border: '3px solid transparent', borderTopColor: C.green, animation: 'spin 1.2s linear infinite', position: 'absolute' }} />
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30 }}>🎬</div>
-      </div>
-      <div style={{ fontSize: 11, color: C.green, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
-        {t.demoFlow}
-      </div>
-      <h2 style={{ fontSize: 22, fontWeight: 700, color: C.green, marginBottom: 6 }}>{t.demoProcessing}</h2>
-      <p style={{ color: C.grayLight, fontSize: 14, marginBottom: 6 }}>{title}</p>
-      <p style={{ color: C.gray, fontSize: 12, marginBottom: 22 }}>
-        {(demo.duration_s || 0).toFixed(1)} s · {demo.events_count || 0} events · {demo.frame_count || 0} frames
-      </p>
-      <p style={{ color: C.grayLight, fontSize: 14, marginBottom: 10, minHeight: 20 }}>{stages[Math.max(0, stageIndex - 1)]}</p>
-      <p style={{ color: C.gray, fontSize: 12, marginBottom: 24 }}>{t.demoNoUpload}</p>
-      <div style={{ height: 4, background: C.border, borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{ height: '100%', background: `linear-gradient(90deg, ${C.green}, #00D4FF)`, borderRadius: 2, width: `${pct}%`, transition: 'width 0.6s ease' }} />
-      </div>
-      <div style={{ marginTop: 8, fontSize: 11, color: C.gray, fontFamily: 'monospace' }}>
-        Step {stageIndex} of {stages.length}
-      </div>
-    </div>
+    <ProgressScreenBody
+      t={t}
+      job={fakeJob}
+      currentStep={stageIndex}
+      progressPct={pct}
+      detailNote={detailNote}
+      elapsedTotalS={elapsedS}
+      remainingS={remainingS}
+      estimatedTotalS={estimatedTotalS}
+    />
   );
 }
 
@@ -1235,18 +1231,6 @@ function Analysis({ setScreen, lang, jobId }) {
           <span style={{ color: C.white }}>
             {job.opponent || job.filename}
           </span>
-          {isDemo ? (
-            <>
-              <span>·</span>
-              <span style={{
-                color: C.green, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em',
-                textTransform: 'uppercase', padding: '3px 8px', borderRadius: 999,
-                border: `1px solid ${C.green}44`, background: `${C.green}14`,
-              }}>
-                {t.demoBadge}
-              </span>
-            </>
-          ) : null}
           <span style={{ color: C.gray }}>· {(job.duration_s || 0).toFixed(1)}s · {(job.fps || 0).toFixed(0)} fps</span>
         </div>
 

@@ -28,6 +28,7 @@ import argparse
 import json
 import sys
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,6 +45,8 @@ STAGES = [
     ("visualizer",   "Rendering tactical overlay…"),
     ("explainer",    "Generating coaching insights…"),
 ]
+
+STAGE_LABELS = ("tracking", "assign_teams", "metrics", "visualizer", "explainer")
 
 
 # ── Auto-tune for long videos ──────────────────────────────────────────────
@@ -82,11 +85,29 @@ def _probe_duration(video_path: Path) -> float:
     return nframes / fps if fps else 0.0
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _estimate_stage_seconds(duration_s: float, vid_stride: int) -> dict[str, float]:
+    tracked_seconds = duration_s / max(1, vid_stride)
+    estimates = {
+        "tracking": max(18.0, tracked_seconds * 2.6),
+        "assign_teams": max(4.0, tracked_seconds * 0.22),
+        "metrics": max(2.0, tracked_seconds * 0.04),
+        "visualizer": max(10.0, duration_s * 0.65),
+        "explainer": 12.0,
+    }
+    estimates["total"] = round(sum(estimates.values()), 1)
+    return {k: round(v, 1) for k, v in estimates.items()}
+
+
 def _set_stage(job_id: str, idx: int) -> None:
     update_job(job_id,
                status=STAGES[idx][0],
                stage_index=idx,
-               stage_message=STAGES[idx][1])
+               stage_message=STAGES[idx][1],
+               stage_started_at=_now_iso())
 
 
 def _stage_tracking(job_id: str, video_path: Path,
@@ -169,11 +190,15 @@ def run(job_id: str) -> None:
     # gets corrected later from the metrics step.
     probed_dur = _probe_duration(video_path)
     vid_stride, model_name = _auto_tune(probed_dur)
+    stage_estimates = _estimate_stage_seconds(probed_dur, vid_stride)
     update_job(
         job_id,
         probed_duration_s=round(probed_dur, 1),
         vid_stride=vid_stride,
         tracking_model=model_name or "default",
+        pipeline_started_at=_now_iso(),
+        estimated_total_s=stage_estimates["total"],
+        stage_estimates={k: stage_estimates[k] for k in STAGE_LABELS},
     )
     print(
         f"[runner] auto-tune: duration~{probed_dur:.1f}s "
